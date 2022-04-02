@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __LRTP_HPP__
+#define __LRTP_HPP__
 
 #include <Arduino.h>
 #include <unordered_map>
@@ -10,35 +11,31 @@
 #include "LRTPConstants.hpp"
 #include "LRTPConnection.hpp"
 
-struct LRTPFlags
+enum class LoRaState
 {
-    bool syn;
-    bool fin;
-    bool ack;
-};
-
-struct LRTPPacket
-{
-    uint8_t version;
-    uint8_t type;
-    LRTPFlags flags;
-    uint8_t ackWindow;
-    uint16_t src;
-    uint16_t dest;
-    uint8_t seqNum;
-    uint8_t ackNum;
-    uint8_t *payload;
-    size_t payload_length;
+    IDLE_RECEIVE,
+    RECEIVE,
+    CAD_STARTED,
+    CAD_FINISHED,
+    TRANSMIT
 };
 
 class LRTP
 {
 public:
-    LRTP(uint16_t hostAddr);
+    LRTP(uint16_t m_hostAddr);
 
-    LRTPConnection *connect(uint16_t destAddr);
+    std::shared_ptr<LRTPConnection> connect(uint16_t destAddr);
+
     int begin();
+
     void loop();
+
+    /**
+     * @brief Set a handler to be called when a new client has connected
+     *
+     */
+    void onConnect(std::function<void(std::shared_ptr<LRTPConnection>)> callback);
 
     /**
      * @brief Parse a raw packet into the struct outPacket from a buffer of given length
@@ -55,15 +52,27 @@ public:
     static uint8_t packFlags(const LRTPFlags &flags);
 
 private:
-    std::unordered_map<uint16_t, std::unique_ptr<LRTPConnection>> m_activeConnections;
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> > m_activeConnections;
 
-    uint16_t hostAddr;
+    uint16_t m_hostAddr;
 
-    int loraRxBytesWaiting = 0;
+    int m_loraRxBytesWaiting = 0;
+
+    LoRaState m_currentLoRaState;
+
+    std::function<void(std::shared_ptr<LRTPConnection>)> _onConnect = nullptr;
 
     uint8_t m_rxBuffer[LRTP_MAX_PACKET * LRTP_GLOBAL_RX_BUFFER_SZ];
 
+    void loopReceive();
+
+    void loopTransmit();
+
     void handleIncomingPacket(const LRTPPacket &packet);
+
+    void handleIncomingConnectionPacket(const LRTPPacket &packet);
+
+    void sendPacket(const LRTPPacket &packet);
 
     // handlers for LoRa async
     void onLoRaPacketReceived(int packetSize);
@@ -72,3 +81,5 @@ private:
 };
 
 void debug_print_packet(const LRTPPacket &packet);
+
+#endif

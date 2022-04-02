@@ -1,7 +1,21 @@
 #include "LRTP.hpp"
+// #include "CircularBuffer.hpp"
 
-LRTP::LRTP(uint16_t hostAddr) : hostAddr(hostAddr)
+LRTP::LRTP(uint16_t m_hostAddr) : m_hostAddr(m_hostAddr)
 {
+}
+
+std::shared_ptr<LRTPConnection> LRTP::connect(uint16_t destAddr)
+{
+    // check if connection exists
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> >::const_iterator connection = m_activeConnections.find(destAddr);
+    if (connection != m_activeConnections.end())
+    {
+        return connection->second;
+    }
+    std::shared_ptr<LRTPConnection> newConnection = std::make_shared<LRTPConnection>(m_hostAddr, destAddr);
+    m_activeConnections[destAddr] = newConnection;
+    return newConnection;
 }
 
 int LRTP::begin()
@@ -11,8 +25,13 @@ int LRTP::begin()
     LoRa.onTxDone(std::bind(&LRTP::onLoRaTxDone, this));
     LoRa.onCadDone(std::bind(&LRTP::onLoRaCADDone, this));
     LoRa.receive();
-
+    // m_currentLoRaState = LoRaState::IDLE_RECEIVE;
     return 1;
+}
+
+void LRTP::onConnect(std::function<void(std::shared_ptr<LRTPConnection>)> callback)
+{
+    _onConnect = callback;
 }
 
 int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
@@ -52,6 +71,30 @@ void LRTP::handleIncomingPacket(const LRTPPacket &packet)
 {
     Serial.printf("%s: Handling packet:\n", __PRETTY_FUNCTION__);
     debug_print_packet(packet);
+
+    // find connection pertaining to this packet
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> >::const_iterator connection = m_activeConnections.find(packet.src);
+    if (connection == m_activeConnections.end())
+    {
+        // the source of the packet is not in our active connections!
+        // it may be a new incoming connection, otherwise we should ignore it
+        return handleIncomingConnectionPacket(packet);
+    }
+    // pass the packet onto the connection:
+    return connection->second->handleIncomingPacket(packet);
+}
+
+void LRTP::handleIncomingConnectionPacket(const LRTPPacket &packet)
+{
+    Serial.printf("%s: Handling Connection packet:\n", __PRETTY_FUNCTION__);
+    // TODO: check for syn flag and respond with ACK
+    std::shared_ptr<LRTPConnection> newConnection = std::make_shared<LRTPConnection>(m_hostAddr, packet.src);
+    m_activeConnections[packet.src] = newConnection;
+
+    if (_onConnect != nullptr)
+        _onConnect(newConnection);
+
+    newConnection->handleIncomingPacket(packet);
 }
 
 int LRTP::parseHeaderFlags(LRTPFlags *outFlags, uint8_t rawFlags)
@@ -69,22 +112,75 @@ uint8_t LRTP::packFlags(const LRTPFlags &flags)
 
 void LRTP::loop()
 {
-    if (loraRxBytesWaiting > 0)
+    loopReceive();
+    loopTransmit();
+}
+
+void LRTP::loopReceive()
+{
+    if (m_loraRxBytesWaiting > 0)
     {
         LRTPPacket pkt;
-        int parseResult = LRTP::parsePacket(&pkt, this->m_rxBuffer, loraRxBytesWaiting);
+        int parseResult = LRTP::parsePacket(&pkt, this->m_rxBuffer, m_loraRxBytesWaiting);
         if (parseResult)
         {
             handleIncomingPacket(pkt);
         }
-        loraRxBytesWaiting = 0;
+        m_loraRxBytesWaiting = 0;
     }
+}
+
+void LRTP::loopTransmit()
+{
+    if (m_activeConnections.size() > 0)
+    {
+        // loop round-robin through the current connections, until a new packet is found for transmit
+        static std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> >::const_iterator txTarget = m_activeConnections.begin();
+        // bool gotPacket = false;
+        LRTPPacket *txPacket = nullptr;
+        while (txTarget != m_activeConnections.end())
+        {
+            txPacket = txTarget->second->getNextTxPacket();
+            if (txPacket != nullptr)
+                break;
+            ++txTarget;
+        };
+        if (txPacket != nullptr)
+            sendPacket(*txPacket);
+        // loop back to the beginning if we've reached the end of the map
+        if (txTarget == m_activeConnections.end())
+            txTarget = m_activeConnections.begin();
+    }
+}
+
+void LRTP::sendPacket(const LRTPPacket &packet)
+{
+    Serial.printf("%s: Sending Packet of length: %d. Src: %d, Dest: %u\n", __PRETTY_FUNCTION__, packet.payload_length, packet.src, packet.dest);
+
+    uint8_t verAndType = (packet.version << 0x04) | (packet.type & 0x0f);
+    uint8_t flagsAndWindow = (packFlags(packet.flags) << 0x04) | (packet.ackWindow & 0x0f);
+    uint8_t src_hi = packet.src >> 0x08;
+    uint8_t src_lo = packet.src & 0xff;
+    uint8_t dest_hi = packet.dest >> 0x08;
+    uint8_t dest_lo = packet.dest & 0xff;
+    // write packet data
+    LoRa.beginPacket();
+    LoRa.write(verAndType);
+    LoRa.write(flagsAndWindow);
+    LoRa.write(src_hi);
+    LoRa.write(src_lo);
+    LoRa.write(dest_hi);
+    LoRa.write(dest_lo);
+    LoRa.write(packet.seqNum);
+    LoRa.write(packet.ackNum);
+    LoRa.write(packet.payload, packet.payload_length);
+    LoRa.endPacket();
 }
 
 // handlers for LoRa async
 void LRTP::onLoRaPacketReceived(int packetSize)
 {
-    Serial.printf("%s: Received Packet of length: %d! My addr is %d\n", __PRETTY_FUNCTION__, packetSize, this->hostAddr);
+    Serial.printf("%s: Received Packet of length: %d! My addr is %d\n", __PRETTY_FUNCTION__, packetSize, this->m_hostAddr);
     // read packet into buffer
     uint8_t *bufferStart = this->m_rxBuffer;
     // size_t rxMax = (LRTP_MAX_PACKET * LRTP_GLOBAL_RX_BUFFER_SZ) - 1;
@@ -92,7 +188,7 @@ void LRTP::onLoRaPacketReceived(int packetSize)
     {
         *(bufferStart++) = (uint8_t)LoRa.read();
     }
-    loraRxBytesWaiting = packetSize;
+    m_loraRxBytesWaiting = packetSize;
 }
 void LRTP::onLoRaTxDone()
 {

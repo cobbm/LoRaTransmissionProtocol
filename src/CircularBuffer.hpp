@@ -1,11 +1,15 @@
-#pragma once
+#ifndef __CIRCULARBUFFER_HPP__
+#define __CIRCULARBUFFER_HPP__
 #include <Arduino.h>
 
 template <class T>
 class CircularBuffer
 {
 public:
-    CircularBuffer(int maxCapacity);
+    CircularBuffer(int maxCapacity) : m_maxCapacity(maxCapacity), m_count(0)
+    {
+        this->m_buffer = new T[maxCapacity];
+    }
 
     CircularBuffer(CircularBuffer<T> const &copy)
     {
@@ -37,7 +41,9 @@ public:
 
     // C++11
     CircularBuffer<T>(CircularBuffer<T> &&src) noexcept
-        : m_count(0), m_maxCapacity(0), m_buffer(NULL)
+        : m_count(0),
+          m_maxCapacity(0),
+          m_buffer(NULL)
     {
         src.swap(*this);
     }
@@ -48,22 +54,96 @@ public:
         return *this;
     }
 
-    ~CircularBuffer();
+    // ~CircularBuffer();
 
-    size_t size();
-    size_t count();
+    // size_t size();
+    // size_t count();
 
-    bool enqueue(const T &elem);
-    T *enqueueEmpty();
+    // bool enqueue(const T &elem);
+    // T *enqueueEmpty();
 
-    T *peek();
-    T *dequeue();
+    // T *peek();
+    // T *dequeue();
+
+    ~CircularBuffer()
+    {
+        delete[] this->m_buffer;
+    }
+
+    size_t size()
+    {
+        return this->m_maxCapacity;
+    }
+
+    size_t count()
+    {
+        return this->m_count;
+    }
+
+    bool enqueue(const T &elem)
+    {
+        if (this->m_count >= this->m_maxCapacity)
+        {
+            return false;
+        }
+        if (this->m_count == 0)
+        {
+            this->m_head = 0;
+            this->m_tail = 0;
+        }
+        this->m_buffer[this->m_tail++] = elem;
+        this->m_tail %= this->m_maxCapacity;
+        this->m_count++;
+        return true;
+    }
+
+    T *enqueueEmpty()
+    {
+        if (this->m_count >= this->m_maxCapacity)
+        {
+            return nullptr;
+        }
+        if (this->m_count == 0)
+        {
+            this->m_head = 0;
+            this->m_tail = 0;
+        }
+        T *elem = &this->m_buffer[this->m_tail++];
+        this->m_tail %= this->m_maxCapacity;
+        this->m_count++;
+        // zero out the data
+        memset(elem, 0, sizeof(T));
+        return elem;
+    }
+
+    T *peek()
+    {
+        if (this->m_count <= 0)
+        {
+            return nullptr;
+        }
+        return &this->m_buffer[this->m_head];
+    }
+
+    T *dequeue()
+    {
+        if (this->m_count <= 0)
+        {
+            return nullptr;
+        }
+        T *elem = &this->m_buffer[this->m_head++];
+        this->m_head %= this->m_maxCapacity;
+        this->m_count--;
+        return elem;
+    }
 
 private:
-    T *m_buffer;
+    T *m_buffer = nullptr;
     size_t m_maxCapacity;
     size_t m_count;
 
     int m_head = 0;
     int m_tail = 0;
 };
+
+#endif
