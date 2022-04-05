@@ -25,6 +25,14 @@ public:
     using Print::write; // include "Print" methods
     virtual void flush() override;
 
+    /**
+     * @brief Checks if the current connection is ready to transmit a packet or not
+     *
+     * @return true if the current connection can send another packet
+     * @return false if no data or control packets are ready to send
+     */
+    bool isReadyForTransmit();
+
     // packet handling methods
     void handleIncomingPacket(const LRTPPacket &packet);
 
@@ -39,19 +47,32 @@ private:
     uint8_t m_seqNum;
     uint8_t m_ackNum;
 
+    uint8_t m_seqBase;
+    // uint8_t m_nextSeqNum;
+    uint8_t m_windowSize;
+    unsigned long m_packetTimeout = 0;
+    bool m_packetTimeoutStarted = false;
+
     // outgoing packet buffer
     // CircularBuffer<LRTPBufferItem> m_txBuffer;
     CircularBuffer<uint8_t> m_txDataBuffer;
-    CircularBuffer<LRTPPacket> m_txPacketBuff;
+    CircularBuffer<LRTPPacket> m_unackedPackets;
 
     // incoming data buffer
-    uint8_t m_rxBuffer[LRTP_MAX_PAYLOAD_SZ * LRTP_RX_BUFFER_SZ];
+    uint8_t m_rxBuffer[LRTP_MAX_PAYLOAD_SZ * LRTP_RX_PACKET_BUFFER_SZ];
     size_t m_rxBuffPos = 0;
     size_t m_rxBuffLen = 0;
 
-    LRTPPacket *prepareNextTxPacket();
-    // LRTPBufferItem *m_currTxBuffer = nullptr;
     LRTPConnState m_state;
+
+    // void fillTxBuffer();
+
+    LRTPPacket *prepareNextTxPacket();
+
+    void setTxPacketHeader(LRTPPacket &packet);
+    // LRTPBufferItem *m_currTxBuffer = nullptr;
+
+    void handleIncomingPacketFlags(const LRTPPacket &packet);
 };
 
 #endif

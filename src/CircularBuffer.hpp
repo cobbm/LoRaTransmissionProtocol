@@ -9,7 +9,7 @@ public:
     CircularBuffer(int maxCapacity) : m_maxCapacity(maxCapacity), m_count(0)
     {
         this->m_buffer = new T[maxCapacity];
-    }
+    };
 
     CircularBuffer(CircularBuffer<T> const &copy)
     {
@@ -21,13 +21,23 @@ public:
         m_buffer = new T[copy.m_maxCapacity];
 
         std::copy(&copy.m_buffer[0], &copy.m_buffer[copy.m_maxCapacity], m_buffer);
-    }
+    };
+
+    ~CircularBuffer()
+    {
+        delete[] this->m_buffer;
+    };
 
     CircularBuffer<T> &operator=(CircularBuffer<T> rhs)
     {
         rhs.swap(*this);
         return *this;
-    }
+    };
+
+    T *operator[](size_t i)
+    {
+        return &m_buffer[(m_head + i) % m_maxCapacity];
+    };
 
     void swap(CircularBuffer<T> &s) noexcept
     {
@@ -37,7 +47,7 @@ public:
         swap(this.m_head, s.m_head);
         swap(this.m_tail, s.m_tail);
         swap(this.m_count, s.m_count);
-    }
+    };
 
     // C++11
     CircularBuffer<T>(CircularBuffer<T> &&src) noexcept
@@ -46,13 +56,13 @@ public:
           m_buffer(NULL)
     {
         src.swap(*this);
-    }
+    };
 
     CircularBuffer<T> &operator=(CircularBuffer<T> &&src) noexcept
     {
         src.swap(*this);
         return *this;
-    }
+    };
 
     // ~CircularBuffer();
 
@@ -65,20 +75,15 @@ public:
     // T *peek();
     // T *dequeue();
 
-    ~CircularBuffer()
-    {
-        delete[] this->m_buffer;
-    }
-
     size_t size()
     {
         return this->m_maxCapacity;
-    }
+    };
 
     size_t count()
     {
         return this->m_count;
-    }
+    };
 
     bool enqueue(const T &elem)
     {
@@ -95,7 +100,7 @@ public:
         this->m_tail %= this->m_maxCapacity;
         this->m_count++;
         return true;
-    }
+    };
 
     T *enqueueEmpty()
     {
@@ -114,7 +119,7 @@ public:
         // zero out the data
         memset(elem, 0, sizeof(T));
         return elem;
-    }
+    };
 
     T *peek()
     {
@@ -123,7 +128,7 @@ public:
             return nullptr;
         }
         return &this->m_buffer[this->m_head];
-    }
+    };
 
     T *dequeue()
     {
@@ -135,7 +140,7 @@ public:
         this->m_head %= this->m_maxCapacity;
         this->m_count--;
         return elem;
-    }
+    };
 
 private:
     T *m_buffer = nullptr;

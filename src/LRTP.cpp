@@ -1,14 +1,13 @@
 #include "LRTP.hpp"
-// #include "CircularBuffer.hpp"
 
-LRTP::LRTP(uint16_t m_hostAddr) : m_hostAddr(m_hostAddr)
+LRTP::LRTP(uint16_t m_hostAddr) : m_hostAddr(m_hostAddr), m_currentLoRaState(LoRaState::IDLE_RECEIVE)
 {
 }
 
 std::shared_ptr<LRTPConnection> LRTP::connect(uint16_t destAddr)
 {
     // check if connection exists
-    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> >::const_iterator connection = m_activeConnections.find(destAddr);
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator connection = m_activeConnections.find(destAddr);
     if (connection != m_activeConnections.end())
     {
         return connection->second;
@@ -23,12 +22,17 @@ int LRTP::begin()
     // attach callbacks
     LoRa.onReceive(std::bind(&LRTP::onLoRaPacketReceived, this, std::placeholders::_1));
     LoRa.onTxDone(std::bind(&LRTP::onLoRaTxDone, this));
-    LoRa.onCadDone(std::bind(&LRTP::onLoRaCADDone, this));
+    LoRa.onCadDone(std::bind(&LRTP::onLoRaCADDone, this, std::placeholders::_1));
     LoRa.receive();
-    // m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+    m_currentLoRaState = LoRaState::IDLE_RECEIVE;
     return 1;
 }
 
+// void LRTP::end(){
+// TODO
+// }
+
+// callback handlers
 void LRTP::onConnect(std::function<void(std::shared_ptr<LRTPConnection>)> callback)
 {
     _onConnect = callback;
@@ -73,7 +77,7 @@ void LRTP::handleIncomingPacket(const LRTPPacket &packet)
     debug_print_packet(packet);
 
     // find connection pertaining to this packet
-    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> >::const_iterator connection = m_activeConnections.find(packet.src);
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator connection = m_activeConnections.find(packet.src);
     if (connection == m_activeConnections.end())
     {
         // the source of the packet is not in our active connections!
@@ -124,7 +128,19 @@ void LRTP::loopReceive()
         int parseResult = LRTP::parsePacket(&pkt, this->m_rxBuffer, m_loraRxBytesWaiting);
         if (parseResult)
         {
-            handleIncomingPacket(pkt);
+            if (pkt.dest == m_hostAddr)
+            {
+                handleIncomingPacket(pkt);
+            }
+            else if (pkt.dest == LRTP_BROADCAST)
+            {
+                // handleIncomingBroadcastPacket(pkt)
+                Serial.printf("%s: Broadcast packet received! TODO Implement broadcast!\n", __PRETTY_FUNCTION__);
+            }
+            else
+            {
+                Serial.printf("%s: Packet was not addressed to me - ignored\n", __PRETTY_FUNCTION__);
+            }
         }
         m_loraRxBytesWaiting = 0;
     }
@@ -132,30 +148,106 @@ void LRTP::loopReceive()
 
 void LRTP::loopTransmit()
 {
-    if (m_activeConnections.size() > 0)
+    // Serial.println("Transmit loop");
+    //  if radio is currently idle, get the next packet to send, if it exists
+    if (m_currentLoRaState == LoRaState::IDLE_RECEIVE)
     {
-        // loop round-robin through the current connections, until a new packet is found for transmit
-        static std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> >::const_iterator txTarget = m_activeConnections.begin();
-        // bool gotPacket = false;
-        LRTPPacket *txPacket = nullptr;
-        while (txTarget != m_activeConnections.end())
+        // Serial.println("Transmit loop ->> IDLE");
+        if (m_activeConnections.size() > 0)
         {
-            txPacket = txTarget->second->getNextTxPacket();
-            if (txPacket != nullptr)
-                break;
-            ++txTarget;
-        };
-        if (txPacket != nullptr)
-            sendPacket(*txPacket);
-        // loop back to the beginning if we've reached the end of the map
-        if (txTarget == m_activeConnections.end())
-            txTarget = m_activeConnections.begin();
+            // loop round-robin through the current connections, until we find a connection which has a packet ready for transmit
+            static std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator txTarget = m_activeConnections.begin();
+            // bool gotPacket = false;
+            // LRTPPacket *txPacket = nullptr;
+            while (txTarget != m_activeConnections.end())
+            {
+                // Serial.println("Checking connection...");
+                if (txTarget->second->isReadyForTransmit())
+                {
+                    Serial.println("GOT connection ready for transmit!");
+                    m_nextConnectionForTransmit = txTarget->second.get();
+                    beginCAD();
+                    break;
+                }
+                // move iterator forward to the next conenction in the map
+                ++txTarget;
+            }
+            // Serial.println("END idle transmit loop");
+
+            // loop back to the beginning if we reach the end of the map
+            if (txTarget == m_activeConnections.end())
+                txTarget = m_activeConnections.begin();
+        }
     }
+    else if (m_currentLoRaState == LoRaState::CAD_FINISHED)
+    {
+        // transmit after CAD finishes
+        Serial.printf("%s: CAD finished, channel busy: %u, sending packet...\n", __PRETTY_FUNCTION__, m_channelActive);
+        LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket();
+        if (p != nullptr)
+        {
+            // debug_print_packet(*p);
+            sendPacket(*p);
+        }
+        else
+        {
+            Serial.printf("%s: Warning: Transmit packet was null!\n", __PRETTY_FUNCTION__);
+            m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+        }
+    }
+    else if (m_currentLoRaState == LoRaState::RECEIVE)
+    {
+        // fix to prevent getting stuck in RECEIVE state if a corrupt/partial packet is received and onPacketReceive callback is never called
+
+        unsigned long t = millis();
+
+        if (t - m_checkReceiveTimeout >= LORA_SIGNAL_TIMEOUT)
+        {
+            bool receiving = LoRa.rxSignalDetected();
+            if (receiving)
+            {
+                m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
+            }
+            else
+            {
+                m_checkReceiveRounds--;
+            }
+            m_checkReceiveTimeout = t;
+        }
+        if (m_checkReceiveRounds <= 0)
+        {
+            // no signal has been detected, switch back to idle state
+            m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+        }
+    }
+}
+
+bool LRTP::beginCAD()
+{
+    // check if the radio is receiving a packet
+    bool channelFree = !LoRa.rxSignalDetected();
+    if (channelFree)
+    {
+        m_currentLoRaState = LoRaState::CAD_STARTED;
+        // set CAD counter
+        m_cadRoundsRemaining = LRTP_CAD_ROUNDS;
+        // put the radio into CAD mode only if we're not mid-way through receiveing a packet
+        Serial.printf("%s: starting CAD!\n", __PRETTY_FUNCTION__);
+        LoRa.channelActivityDetection();
+    }
+    else
+    {
+        m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
+        m_currentLoRaState = LoRaState::RECEIVE;
+    }
+    return channelFree;
 }
 
 void LRTP::sendPacket(const LRTPPacket &packet)
 {
-    Serial.printf("%s: Sending Packet of length: %d. Src: %d, Dest: %u\n", __PRETTY_FUNCTION__, packet.payload_length, packet.src, packet.dest);
+    Serial.printf("%s: Sending Packet. length: %d. Src: %d, Dest: %u Seq: %u, Ack: %u\n", __PRETTY_FUNCTION__, packet.payload_length, packet.src, packet.dest, packet.seqNum, packet.ackNum);
+
+    m_currentLoRaState = LoRaState::TRANSMIT;
 
     uint8_t verAndType = (packet.version << 0x04) | (packet.type & 0x0f);
     uint8_t flagsAndWindow = (packFlags(packet.flags) << 0x04) | (packet.ackWindow & 0x0f);
@@ -174,7 +266,7 @@ void LRTP::sendPacket(const LRTPPacket &packet)
     LoRa.write(packet.seqNum);
     LoRa.write(packet.ackNum);
     LoRa.write(packet.payload, packet.payload_length);
-    LoRa.endPacket();
+    LoRa.endPacket(true);
 }
 
 // handlers for LoRa async
@@ -189,16 +281,43 @@ void LRTP::onLoRaPacketReceived(int packetSize)
         *(bufferStart++) = (uint8_t)LoRa.read();
     }
     m_loraRxBytesWaiting = packetSize;
+    // set state back to idle/receive
+    m_currentLoRaState = LoRaState::IDLE_RECEIVE;
 }
+
 void LRTP::onLoRaTxDone()
 {
     Serial.printf("%s: TX Done\n", __PRETTY_FUNCTION__);
-}
-void LRTP::onLoRaCADDone()
-{
-    Serial.printf("%s: CAD Done\n", __PRETTY_FUNCTION__);
+    m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+    // put radio back into receive mode
+    LoRa.receive();
 }
 
+void LRTP::onLoRaCADDone(bool channelBusy)
+{
+    Serial.printf("%s: CAD Done (%u)\n", __PRETTY_FUNCTION__, m_cadRoundsRemaining);
+    m_channelActive = channelBusy;
+    if (channelBusy)
+    {
+        // finish early if channel is busy and enter receive mode to receive the incoming packet
+        m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
+        m_currentLoRaState = LoRaState::RECEIVE;
+        LoRa.receive();
+        return;
+    }
+    if (m_cadRoundsRemaining <= 0)
+    {
+        m_currentLoRaState = LoRaState::CAD_FINISHED;
+    }
+    else
+    {
+        m_cadRoundsRemaining--;
+        // start channel activity detect again
+        LoRa.channelActivityDetection();
+    }
+}
+
+// ======= DEBUG METHODS =======
 void debug_print_packet(const LRTPPacket &packet)
 {
     Serial.printf("Version: %u (0x%02X)\n", packet.version, packet.version);
@@ -245,4 +364,5 @@ void debug_print_packet(const LRTPPacket &packet)
     {
         Serial.print((char)packet.payload[i]);
     }
+    Serial.println();
 }

@@ -52,32 +52,58 @@ public:
     static uint8_t packFlags(const LRTPFlags &flags);
 
 private:
-    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> > m_activeConnections;
-
     uint16_t m_hostAddr;
-
-    int m_loraRxBytesWaiting = 0;
 
     LoRaState m_currentLoRaState;
 
-    std::function<void(std::shared_ptr<LRTPConnection>)> _onConnect = nullptr;
+    unsigned int m_cadRoundsRemaining = 0;
 
+    bool m_channelActive = false;
+
+    // the number of bytes waiting to be read by a connection currently in the receive buffer
+    int m_loraRxBytesWaiting = 0;
+
+    // stores the next connection which has a packet waiting to transmit, so it can be used after channel activity detection completes
+    LRTPConnection *m_nextConnectionForTransmit = nullptr;
+
+    // a buffer used to hold bytes read from the radio that have not yet been processed by a connection
     uint8_t m_rxBuffer[LRTP_MAX_PACKET * LRTP_GLOBAL_RX_BUFFER_SZ];
 
-    void loopReceive();
+    // map from connection address to connection object. used to dispatch data to the correct connection once it has been received.
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> > m_activeConnections;
 
+    unsigned int m_checkReceiveRounds = 0;
+    unsigned long m_checkReceiveTimeout = 0;
+
+    // event handlers
+    std::function<void(std::shared_ptr<LRTPConnection>)> _onConnect = nullptr;
+
+    // handles receiveing data from the radio during the update loop
+    void loopReceive();
+    // handles the transmision of a packet during the loop
     void loopTransmit();
+
+    /**
+     * @brief starts channel activity detection before transmitting a packet. switches to CAD_STARTED state.
+     * If this is called while a packet is being received, switches state to RECEIVE and doesn't start CAD
+     * (otherwise the packet being received will be dropped by the LoRa radio.)
+     *
+     * @return true if CAD was successfully started
+     * @return false if we're part way through receiving a packet
+     */
+    bool beginCAD();
 
     void handleIncomingPacket(const LRTPPacket &packet);
 
     void handleIncomingConnectionPacket(const LRTPPacket &packet);
 
+    // sends a packet once CAD has finished
     void sendPacket(const LRTPPacket &packet);
 
     // handlers for LoRa async
     void onLoRaPacketReceived(int packetSize);
     void onLoRaTxDone();
-    void onLoRaCADDone();
+    void onLoRaCADDone(bool channelBusy);
 };
 
 void debug_print_packet(const LRTPPacket &packet);
