@@ -2,6 +2,14 @@
 #define __CIRCULARBUFFER_HPP__
 #include <Arduino.h>
 
+/**
+ * @brief Simple circular buffer implementation
+ *
+ * @tparam T base type of the circular buffer
+ */
+
+// TODO: add enqueue(T* arr, size_t len); and T* dequeue(size_t len);
+//       to allow enqueue/dequeue mulptiple objects in one go
 template <class T>
 class CircularBuffer
 {

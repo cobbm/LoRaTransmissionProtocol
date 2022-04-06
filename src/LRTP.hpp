@@ -70,10 +70,10 @@ private:
     uint8_t m_rxBuffer[LRTP_MAX_PACKET * LRTP_GLOBAL_RX_BUFFER_SZ];
 
     // map from connection address to connection object. used to dispatch data to the correct connection once it has been received.
-    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection> > m_activeConnections;
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>> m_activeConnections;
 
     unsigned int m_checkReceiveRounds = 0;
-    unsigned long m_checkReceiveTimeout = 0;
+    unsigned long m_timer_checkReceiveTimeout = 0;
 
     // event handlers
     std::function<void(std::shared_ptr<LRTPConnection>)> _onConnect = nullptr;

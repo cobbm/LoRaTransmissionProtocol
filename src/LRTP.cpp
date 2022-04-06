@@ -74,7 +74,8 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
 void LRTP::handleIncomingPacket(const LRTPPacket &packet)
 {
     Serial.printf("%s: Handling packet:\n", __PRETTY_FUNCTION__);
-    debug_print_packet(packet);
+    // debug_print_packet(packet);
+    Serial.printf("%s: Handling packet from: %u, Seq:%u, Ack:%u\n", __PRETTY_FUNCTION__, packet.src, packet.seqNum, packet.ackNum);
 
     // find connection pertaining to this packet
     std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator connection = m_activeConnections.find(packet.src);
@@ -132,7 +133,7 @@ void LRTP::loopReceive()
             {
                 handleIncomingPacket(pkt);
             }
-            else if (pkt.dest == LRTP_BROADCAST)
+            else if (pkt.dest == LRTP_BROADCAST_ADDR)
             {
                 // handleIncomingBroadcastPacket(pkt)
                 Serial.printf("%s: Broadcast packet received! TODO Implement broadcast!\n", __PRETTY_FUNCTION__);
@@ -142,12 +143,17 @@ void LRTP::loopReceive()
                 Serial.printf("%s: Packet was not addressed to me - ignored\n", __PRETTY_FUNCTION__);
             }
         }
+        else
+        {
+            Serial.printf("%s: ERROR: Could not parse packet!\n", __PRETTY_FUNCTION__);
+        }
         m_loraRxBytesWaiting = 0;
     }
 }
 
 void LRTP::loopTransmit()
 {
+    unsigned long t = millis();
     // Serial.println("Transmit loop");
     //  if radio is currently idle, get the next packet to send, if it exists
     if (m_currentLoRaState == LoRaState::IDLE_RECEIVE)
@@ -162,7 +168,8 @@ void LRTP::loopTransmit()
             while (txTarget != m_activeConnections.end())
             {
                 // Serial.println("Checking connection...");
-                if (txTarget->second->isReadyForTransmit())
+                // txTarget->second->update(t);
+                if (txTarget->second->isReadyForTransmit(t))
                 {
                     Serial.println("GOT connection ready for transmit!");
                     m_nextConnectionForTransmit = txTarget->second.get();
@@ -183,7 +190,7 @@ void LRTP::loopTransmit()
     {
         // transmit after CAD finishes
         Serial.printf("%s: CAD finished, channel busy: %u, sending packet...\n", __PRETTY_FUNCTION__, m_channelActive);
-        LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket();
+        LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket(t);
         if (p != nullptr)
         {
             // debug_print_packet(*p);
@@ -199,25 +206,23 @@ void LRTP::loopTransmit()
     {
         // fix to prevent getting stuck in RECEIVE state if a corrupt/partial packet is received and onPacketReceive callback is never called
 
-        unsigned long t = millis();
-
-        if (t - m_checkReceiveTimeout >= LORA_SIGNAL_TIMEOUT)
+        if (t - m_timer_checkReceiveTimeout >= LORA_SIGNAL_TIMEOUT)
         {
             bool receiving = LoRa.rxSignalDetected();
             if (receiving)
             {
                 m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
             }
+            else if (m_checkReceiveRounds <= 1)
+            {
+                // no signal has been detected, switch back to idle state
+                m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+            }
             else
             {
                 m_checkReceiveRounds--;
             }
-            m_checkReceiveTimeout = t;
-        }
-        if (m_checkReceiveRounds <= 0)
-        {
-            // no signal has been detected, switch back to idle state
-            m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+            m_timer_checkReceiveTimeout = t;
         }
     }
 }
@@ -305,15 +310,15 @@ void LRTP::onLoRaCADDone(bool channelBusy)
         LoRa.receive();
         return;
     }
-    if (m_cadRoundsRemaining <= 0)
-    {
-        m_currentLoRaState = LoRaState::CAD_FINISHED;
-    }
-    else
+    if (m_cadRoundsRemaining > 1)
     {
         m_cadRoundsRemaining--;
         // start channel activity detect again
         LoRa.channelActivityDetection();
+    }
+    else
+    {
+        m_currentLoRaState = LoRaState::CAD_FINISHED;
     }
 }
 

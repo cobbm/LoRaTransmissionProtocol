@@ -31,12 +31,12 @@ public:
      * @return true if the current connection can send another packet
      * @return false if no data or control packets are ready to send
      */
-    bool isReadyForTransmit();
+    bool isReadyForTransmit(unsigned long t);
 
     // packet handling methods
     void handleIncomingPacket(const LRTPPacket &packet);
 
-    LRTPPacket *getNextTxPacket();
+    LRTPPacket *getNextTxPacket(unsigned long t);
 
     uint16_t getRemoteAddr();
 
@@ -44,19 +44,22 @@ private:
     // connection variables
     uint16_t m_srcAddr;
     uint16_t m_destAddr;
-    uint8_t m_seqNum;
+    uint8_t m_nextSeqNum;
     uint8_t m_ackNum;
 
     uint8_t m_seqBase;
     // uint8_t m_nextSeqNum;
     uint8_t m_windowSize;
-    unsigned long m_packetTimeout = 0;
-    bool m_packetTimeoutStarted = false;
+    unsigned long m_timer_packetTimeout = 0;
+    bool m_timer_packetTimeoutActive = false;
 
+    uint8_t m_packetRetries = 0;
+
+    bool m_piggybackPacket = false;
     // outgoing packet buffer
     // CircularBuffer<LRTPBufferItem> m_txBuffer;
     CircularBuffer<uint8_t> m_txDataBuffer;
-    CircularBuffer<LRTPPacket> m_unackedPackets;
+    CircularBuffer<LRTPPacket> m_txWindow;
 
     // incoming data buffer
     uint8_t m_rxBuffer[LRTP_MAX_PAYLOAD_SZ * LRTP_RX_PACKET_BUFFER_SZ];
@@ -65,14 +68,14 @@ private:
 
     LRTPConnState m_state;
 
-    // void fillTxBuffer();
+    LRTPPacket *getNextTxPacketData();
 
-    LRTPPacket *prepareNextTxPacket();
+    // LRTPPacket *prepareNextTxPacket();
 
     void setTxPacketHeader(LRTPPacket &packet);
     // LRTPBufferItem *m_currTxBuffer = nullptr;
 
-    void handleIncomingPacketFlags(const LRTPPacket &packet);
+    void handleIncomingPacketHeader(const LRTPPacket &packet);
 };
 
 #endif
