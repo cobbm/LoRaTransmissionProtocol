@@ -73,7 +73,7 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
 
 void LRTP::handleIncomingPacket(const LRTPPacket &packet)
 {
-    Serial.printf("%s: Handling packet:\n", __PRETTY_FUNCTION__);
+    // Serial.printf("%s: Handling packet:\n", __PRETTY_FUNCTION__);
     // debug_print_packet(packet);
     Serial.printf("%s: Handling packet from: %u, Seq:%u, Ack:%u\n", __PRETTY_FUNCTION__, packet.src, packet.seqNum, packet.ackNum);
 
@@ -171,7 +171,7 @@ void LRTP::loopTransmit()
                 // txTarget->second->update(t);
                 if (txTarget->second->isReadyForTransmit(t))
                 {
-                    Serial.println("GOT connection ready for transmit!");
+                    // Serial.println("GOT connection ready for transmit!");
                     m_nextConnectionForTransmit = txTarget->second.get();
                     beginCAD();
                     break;
@@ -189,7 +189,7 @@ void LRTP::loopTransmit()
     else if (m_currentLoRaState == LoRaState::CAD_FINISHED)
     {
         // transmit after CAD finishes
-        Serial.printf("%s: CAD finished, channel busy: %u, sending packet...\n", __PRETTY_FUNCTION__, m_channelActive);
+        // Serial.printf("%s: CAD finished, channel busy: %u\n    Sending packet...\n", __PRETTY_FUNCTION__, m_channelActive);
         LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket(t);
         if (p != nullptr)
         {
@@ -198,7 +198,7 @@ void LRTP::loopTransmit()
         }
         else
         {
-            Serial.printf("%s: Warning: Transmit packet was null!\n", __PRETTY_FUNCTION__);
+            Serial.printf("%s: ERROR: Transmit packet was null!\n", __PRETTY_FUNCTION__);
             m_currentLoRaState = LoRaState::IDLE_RECEIVE;
         }
     }
@@ -237,7 +237,7 @@ bool LRTP::beginCAD()
         // set CAD counter
         m_cadRoundsRemaining = LRTP_CAD_ROUNDS;
         // put the radio into CAD mode only if we're not mid-way through receiveing a packet
-        Serial.printf("%s: starting CAD!\n", __PRETTY_FUNCTION__);
+        Serial.printf("%s: starting CAD:", __PRETTY_FUNCTION__);
         LoRa.channelActivityDetection();
     }
     else
@@ -277,7 +277,7 @@ void LRTP::sendPacket(const LRTPPacket &packet)
 // handlers for LoRa async
 void LRTP::onLoRaPacketReceived(int packetSize)
 {
-    Serial.printf("%s: Received Packet of length: %d! My addr is %d\n", __PRETTY_FUNCTION__, packetSize, this->m_hostAddr);
+    Serial.printf("%s: Received Packet of length: %d!\n", __PRETTY_FUNCTION__, packetSize);
     // read packet into buffer
     uint8_t *bufferStart = this->m_rxBuffer;
     // size_t rxMax = (LRTP_MAX_PACKET * LRTP_GLOBAL_RX_BUFFER_SZ) - 1;
@@ -300,10 +300,11 @@ void LRTP::onLoRaTxDone()
 
 void LRTP::onLoRaCADDone(bool channelBusy)
 {
-    Serial.printf("%s: CAD Done (%u)\n", __PRETTY_FUNCTION__, m_cadRoundsRemaining);
+    Serial.printf("%u (%u) ", channelBusy, m_cadRoundsRemaining);
     m_channelActive = channelBusy;
     if (channelBusy)
     {
+        Serial.println();
         // finish early if channel is busy and enter receive mode to receive the incoming packet
         m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
         m_currentLoRaState = LoRaState::RECEIVE;
@@ -319,6 +320,7 @@ void LRTP::onLoRaCADDone(bool channelBusy)
     else
     {
         m_currentLoRaState = LoRaState::CAD_FINISHED;
+        Serial.println();
     }
 }
 

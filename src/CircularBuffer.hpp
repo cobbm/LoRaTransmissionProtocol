@@ -1,5 +1,4 @@
-#ifndef __CIRCULARBUFFER_HPP__
-#define __CIRCULARBUFFER_HPP__
+#pragma once
 #include <Arduino.h>
 
 /**
@@ -158,5 +157,3 @@ private:
     int m_head = 0;
     int m_tail = 0;
 };
-
-#endif

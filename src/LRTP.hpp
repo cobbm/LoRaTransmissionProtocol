@@ -1,5 +1,4 @@
-#ifndef __LRTP_HPP__
-#define __LRTP_HPP__
+#pragma once
 
 #include <Arduino.h>
 #include <unordered_map>
@@ -107,5 +106,3 @@ private:
 };
 
 void debug_print_packet(const LRTPPacket &packet);
-
-#endif

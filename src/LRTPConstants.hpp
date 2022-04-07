@@ -1,5 +1,4 @@
-#ifndef __LRTPCONSTANTS_HPP__
-#define __LRTPCONSTANTS_HPP__
+#pragma once
 
 #define LORA_SIGNAL_TIMEOUT_ROUNDS 3
 #define LORA_SIGNAL_TIMEOUT 250
@@ -53,5 +52,3 @@ enum class LRTPConnState
     CLOSE_FIN_ACK,
     CLOSED_END
 };
-
-#endif

@@ -1,6 +1,4 @@
-#ifndef __LRTPCONNECTION_HPP__
-#define __LRTPCONNECTION_HPP__
-
+#pragma once
 #include <Arduino.h>
 // #include "Stream.h"
 
@@ -44,8 +42,11 @@ private:
     // connection variables
     uint16_t m_srcAddr;
     uint16_t m_destAddr;
+
     uint8_t m_nextSeqNum;
-    uint8_t m_ackNum;
+
+    uint8_t m_currentAckNum;
+    uint8_t m_expectedAckNum;
 
     uint8_t m_seqBase;
     // uint8_t m_nextSeqNum;
@@ -53,14 +54,18 @@ private:
     unsigned long m_timer_packetTimeout = 0;
     bool m_timer_packetTimeoutActive = false;
 
+    uint8_t m_remoteWindowSize = 0;
+
     uint8_t m_packetRetries = 0;
 
-    bool m_piggybackPacket = false;
+    bool m_sendPiggybackPacket = false;
+    LRTPFlags m_piggybackFlags;
     // outgoing packet buffer
     // CircularBuffer<LRTPBufferItem> m_txBuffer;
     CircularBuffer<uint8_t> m_txDataBuffer;
     CircularBuffer<LRTPPacket> m_txWindow;
 
+    LRTPPacket m_piggybackPacket;
     // incoming data buffer
     uint8_t m_rxBuffer[LRTP_MAX_PAYLOAD_SZ * LRTP_RX_PACKET_BUFFER_SZ];
     size_t m_rxBuffPos = 0;
@@ -73,9 +78,9 @@ private:
     // LRTPPacket *prepareNextTxPacket();
 
     void setTxPacketHeader(LRTPPacket &packet);
+
+    LRTPPacket *preparePiggybackPacket();
     // LRTPBufferItem *m_currTxBuffer = nullptr;
 
     void handleIncomingPacketHeader(const LRTPPacket &packet);
 };
-
-#endif
