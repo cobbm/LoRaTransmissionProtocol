@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 // #include "Stream.h"
+#include <functional>
 
 #include "LRTPConstants.hpp"
 #include "CircularBuffer.hpp"
@@ -45,14 +46,19 @@ private:
 
     uint8_t m_nextSeqNum;
 
+    uint8_t m_nextAckNum;
     uint8_t m_currentAckNum;
-    uint8_t m_expectedAckNum;
 
     uint8_t m_seqBase;
     // uint8_t m_nextSeqNum;
     uint8_t m_windowSize;
+    // timer to handle packet timeout
     unsigned long m_timer_packetTimeout = 0;
     bool m_timer_packetTimeoutActive = false;
+
+    // timer to handle piggybacking of flags
+    unsigned long m_timer_piggybackTimeout = 0;
+    bool m_timer_piggybackTimeoutActive = false;
 
     uint8_t m_remoteWindowSize = 0;
 
@@ -73,14 +79,18 @@ private:
 
     LRTPConnState m_state;
 
-    LRTPPacket *getNextTxPacketData();
+    std::function<void()> m_onDataReceived = nullptr;
+
+    void onDataReceived(std::function<void()> callback);
+
+    LRTPPacket *prepareNextPacket();
 
     // LRTPPacket *prepareNextTxPacket();
 
     void setTxPacketHeader(LRTPPacket &packet);
 
-    LRTPPacket *preparePiggybackPacket();
+    // LRTPPacket *preparePiggybackPacket();
     // LRTPBufferItem *m_currTxBuffer = nullptr;
 
-    void handleIncomingPacketHeader(const LRTPPacket &packet);
+    bool handleIncomingPacketHeader(const LRTPPacket &packet);
 };
