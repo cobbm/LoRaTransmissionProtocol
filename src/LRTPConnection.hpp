@@ -24,6 +24,7 @@ public:
     using Print::write; // include "Print" methods
     virtual void flush() override;
 
+    void update(unsigned long t);
     /**
      * @brief Checks if the current connection is ready to transmit a packet or not
      *
@@ -52,6 +53,10 @@ private:
     uint8_t m_seqBase;
     // uint8_t m_nextSeqNum;
     uint8_t m_windowSize;
+
+    uint8_t m_remoteWindowSize = 0;
+
+    uint8_t m_packetRetries = 0;
     // timer to handle packet timeout
     unsigned long m_timer_packetTimeout = 0;
     bool m_timer_packetTimeoutActive = false;
@@ -59,10 +64,6 @@ private:
     // timer to handle piggybacking of flags
     unsigned long m_timer_piggybackTimeout = 0;
     bool m_timer_piggybackTimeoutActive = false;
-
-    uint8_t m_remoteWindowSize = 0;
-
-    uint8_t m_packetRetries = 0;
 
     bool m_sendPiggybackPacket = false;
     LRTPFlags m_piggybackFlags;
@@ -81,6 +82,7 @@ private:
 
     std::function<void()> m_onDataReceived = nullptr;
 
+    // Private methods
     void onDataReceived(std::function<void()> callback);
 
     LRTPPacket *prepareNextPacket();
@@ -91,6 +93,7 @@ private:
 
     // LRTPPacket *preparePiggybackPacket();
     // LRTPBufferItem *m_currTxBuffer = nullptr;
-
-    bool handleIncomingPacketHeader(const LRTPPacket &packet);
+    bool handleStateConnectSYN(const LRTPPacket &packet);
+    bool handleStateConnectSYNACK(const LRTPPacket &packet);
+    bool handleStateConnected(const LRTPPacket &packet);
 };

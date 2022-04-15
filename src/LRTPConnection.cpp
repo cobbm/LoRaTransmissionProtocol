@@ -66,6 +66,10 @@ void LRTPConnection::flush() {}
 
 // end print implementation
 
+void LRTPConnection::update(unsigned long t)
+{
+}
+
 bool LRTPConnection::isReadyForTransmit(unsigned long t)
 {
     // we can transmit a packet if there is data in the send buffer, or if we need to send a control packet
@@ -122,7 +126,9 @@ LRTPPacket *LRTPConnection::getNextTxPacket(unsigned long t)
     // handle timeout
     if (m_timer_packetTimeoutActive && t - m_timer_packetTimeout > LRTP_PACKET_TIMEOUT)
     {
+#if LRTP_DEBUG > 2
         Serial.printf("%s: === TIMEOUT %u ===\n", __PRETTY_FUNCTION__, m_packetRetries);
+#endif
         // reset nextsequencenumber to the start of the window
         m_nextSeqNum = m_seqBase;
         // m_timer_packetTimeout = t;
@@ -169,7 +175,9 @@ LRTPPacket *LRTPConnection::getNextTxPacket(unsigned long t)
         }
         else
         {
+#if LRTP_DEBUG > 2
             Serial.printf("%s: Warning: Packet was null!\n", __PRETTY_FUNCTION__);
+#endif
             //  return nullptr;
         }
     }
@@ -177,7 +185,9 @@ LRTPPacket *LRTPConnection::getNextTxPacket(unsigned long t)
     //(piggyback timer has elapsed)
     if (m_sendPiggybackPacket)
     {
+#if LRTP_DEBUG > 2
         Serial.printf("%s: piggybacking!\n", __PRETTY_FUNCTION__);
+#endif
         // we need to force send a piggyback packet.
         // these packets don't need to be buffered as they do not increment sequence number and are not acknowledged by the other party
 
@@ -185,8 +195,10 @@ LRTPPacket *LRTPConnection::getNextTxPacket(unsigned long t)
         nextPacket = &m_piggybackPacket;
         // m_sendPiggybackPacket = false;
     }
+#if LRTP_DEBUG > 2
     if (nextPacket == nullptr)
         Serial.printf("ERROR: Could not get next packet!\n");
+#endif
     return nextPacket;
 }
 
@@ -219,7 +231,15 @@ void LRTPConnection::setTxPacketHeader(LRTPPacket &packet)
     packet.ackNum = m_currentAckNum;
 }
 
-bool LRTPConnection::handleIncomingPacketHeader(const LRTPPacket &packet)
+bool LRTPConnection::handleStateConnectSYN(const LRTPPacket &packet)
+{
+}
+
+bool LRTPConnection::handleStateConnectSYNACK(const LRTPPacket &packet)
+{
+}
+
+bool LRTPConnection::handleStateConnected(const LRTPPacket &packet)
 {
     const bool hasPayload = packet.payload_length > 0;
 
@@ -249,10 +269,11 @@ bool LRTPConnection::handleIncomingPacketHeader(const LRTPPacket &packet)
                         m_timer_packetTimeoutActive = true;
                         m_timer_packetTimeout = millis();
                     }
-
+#if LRTP_DEBUG > 2
+                    Serial.printf("Acknowledge %u -> %u\n", m_seqBase, packet.ackNum);
+#endif
                     while (m_seqBase <= packet.ackNum)
                     {
-                        Serial.printf("Acknowledge %u\n", m_seqBase);
                         // advance sliding window
                         LRTPPacket *oldPacket = m_txWindow.dequeue();
                         if (oldPacket != nullptr)
@@ -266,6 +287,7 @@ bool LRTPConnection::handleIncomingPacketHeader(const LRTPPacket &packet)
                         }
                     }
                     m_nextSeqNum = m_seqBase;
+                    m_packetRetries = 0;
                     //} else if (packet.ackNum == ((m_seqBase-1) & 0xff)){
                     //    //resend the entire window
                     //}
@@ -281,11 +303,9 @@ bool LRTPConnection::handleIncomingPacketHeader(const LRTPPacket &packet)
         {
             // we need to send an ACK for this payload
             m_piggybackFlags.ack = true;
-            // TODO: start piggyback timer
+            // start piggyback timer
             m_timer_piggybackTimeout = millis();
             m_timer_piggybackTimeoutActive = true;
-            // remove this once timer is working:
-            // m_sendPiggybackPacket = true;
         }
         return true;
     }
@@ -297,8 +317,6 @@ bool LRTPConnection::handleIncomingPacketHeader(const LRTPPacket &packet)
         // TODO: start piggyback timer
         m_timer_piggybackTimeout = millis();
         m_timer_piggybackTimeoutActive = true;
-        // remove this once timer is working:
-        // m_sendPiggybackPacket = true;
         return false;
     }
 }
@@ -306,7 +324,7 @@ bool LRTPConnection::handleIncomingPacketHeader(const LRTPPacket &packet)
 void LRTPConnection::handleIncomingPacket(const LRTPPacket &packet)
 {
 
-    bool validPacket = handleIncomingPacketHeader(packet);
+    bool validPacket = handleStateConnected(packet);
     // m_nextAckNum = packet.seqNum + 1;
     if (validPacket && packet.payload_length > 0)
     {

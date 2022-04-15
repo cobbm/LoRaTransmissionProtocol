@@ -24,6 +24,8 @@
 // #define LRTP_DEFAULT_ACKWIN 1
 #define LRTP_DEFAULT_ACKWIN LRTP_TX_PACKET_BUFFER_SZ
 
+#define LRTP_DEBUG 1
+
 struct LRTPFlags
 {
     bool syn;

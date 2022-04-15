@@ -5,6 +5,8 @@
 #include <memory>
 #include <functional>
 
+#include <lwip/sockets.h>
+
 #include <SPI.h>
 #include <LoRa.h>
 
@@ -74,6 +76,8 @@ private:
 
     unsigned int m_checkReceiveRounds = 0;
     unsigned long m_timer_checkReceiveTimeout = 0;
+    void handleReceiveTimeout(unsigned long t);
+    void handleCADDone(unsigned long t);
 
     // event handlers
     std::function<void(std::shared_ptr<LRTPConnection>)> _onConnect = nullptr;
