@@ -36,7 +36,7 @@ struct LRTPFlags
 struct LRTPPacket
 {
     uint8_t version;
-    uint8_t type;
+    uint8_t payloadType;
     LRTPFlags flags;
     uint8_t ackWindow;
     uint16_t src;
@@ -44,7 +44,7 @@ struct LRTPPacket
     uint8_t seqNum;
     uint8_t ackNum;
     uint8_t *payload;
-    size_t payload_length;
+    size_t payloadLength;
 };
 
 enum class LRTPConnState
@@ -55,5 +55,5 @@ enum class LRTPConnState
     CONNECTED,
     CLOSE_FIN,
     CLOSE_FIN_ACK,
-    CLOSED_END
+    // CLOSE_END
 };

@@ -47,7 +47,7 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
     }
     uint8_t verAndType = buf[0];
     outPacket->version = verAndType >> 0x04;
-    outPacket->type = verAndType & 0x0f;
+    outPacket->payloadType = verAndType & 0x0f;
 
     uint8_t flagsAndWindow = buf[1];
     // take upper four bits as the flags, parse into struct
@@ -69,7 +69,7 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
     outPacket->ackNum = buf[7];
     // set payload pointer to the start of the payload and compute payload length
     outPacket->payload = buf + LRTP_HEADER_SZ;
-    outPacket->payload_length = len - LRTP_HEADER_SZ;
+    outPacket->payloadLength = len - LRTP_HEADER_SZ;
     return 1;
 }
 
@@ -96,14 +96,19 @@ void LRTP::handleIncomingPacket(const LRTPPacket &packet)
 void LRTP::handleIncomingConnectionPacket(const LRTPPacket &packet)
 {
     Serial.printf("%s: Handling Connection packet:\n", __PRETTY_FUNCTION__);
-    // TODO: check for syn flag and respond with ACK
-    std::shared_ptr<LRTPConnection> newConnection = std::make_shared<LRTPConnection>(m_hostAddr, packet.src);
-    m_activeConnections[packet.src] = newConnection;
+    if (packet.flags.syn && packet.payloadLength == 0)
+    {
+        std::shared_ptr<LRTPConnection> newConnection = std::make_shared<LRTPConnection>(m_hostAddr, packet.src);
+        m_activeConnections[packet.src] = newConnection;
 
-    if (_onConnect != nullptr)
-        _onConnect(newConnection);
-
-    newConnection->handleIncomingPacket(packet);
+        newConnection->handleIncomingPacket(packet);
+        if (_onConnect != nullptr)
+            _onConnect(newConnection);
+    }
+    else
+    {
+        Serial.printf("%s: Error: invalid packet received - SYN flag not present or payload included!\n", __PRETTY_FUNCTION__);
+    }
 }
 
 int LRTP::parseHeaderFlags(LRTPFlags *outFlags, uint8_t rawFlags)
@@ -130,9 +135,6 @@ void LRTP::loopReceive()
 {
     if (m_loraRxBytesWaiting > 0)
     {
-#if LRTP_DEBUG > 0
-        Serial.printf("Got packet to parse!\n");
-#endif
         LRTPPacket pkt;
         int parseResult = LRTP::parsePacket(&pkt, this->m_rxBuffer, m_loraRxBytesWaiting);
         if (parseResult)
@@ -156,7 +158,7 @@ void LRTP::loopReceive()
             Serial.printf("%s: ERROR: Could not parse packet!\n", __PRETTY_FUNCTION__);
         }
         m_loraRxBytesWaiting = 0;
-        m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+        setState(LoRaState::IDLE_RECEIVE);
     }
 }
 
@@ -172,13 +174,17 @@ void LRTP::loopTransmit()
         {
             // loop round-robin through the current connections, until we find a connection which has a packet ready for transmit
             static std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator txTarget = m_activeConnections.begin();
-            // bool gotPacket = false;
-            // LRTPPacket *txPacket = nullptr;
+
             while (txTarget != m_activeConnections.end())
             {
+                // check if the connection has closed
+                if (txTarget->second->getConnectionState() == LRTPConnState::CLOSED)
+                {
+                    Serial.printf("%s: Warning: Connection has closed\n", __PRETTY_FUNCTION__);
+                }
                 // update each connection
-                txTarget->second->update(t);
-                if (txTarget->second->isReadyForTransmit(t))
+                txTarget->second->updateTimers(t);
+                if (txTarget->second->isReadyForTransmit())
                 {
                     m_nextConnectionForTransmit = txTarget->second.get();
                     beginCAD();
@@ -208,11 +214,11 @@ bool LRTP::beginCAD()
     bool channelFree = !LoRa.rxSignalDetected();
     if (channelFree)
     {
-        m_currentLoRaState = LoRaState::CAD_STARTED;
+        setState(LoRaState::CAD_STARTED);
         // set CAD counter
         m_cadRoundsRemaining = LRTP_CAD_ROUNDS;
 // put the radio into CAD mode only if we're not mid-way through receiveing a packet
-#if LRTP_DEBUG > 0
+#if LRTP_DEBUG > 1
         Serial.println("\nbeginCAD(): Start");
 #endif
         LoRa.channelActivityDetection();
@@ -220,7 +226,7 @@ bool LRTP::beginCAD()
     else
     {
         m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
-        m_currentLoRaState = LoRaState::RECEIVE;
+        setState(LoRaState::RECEIVE);
 #if LRTP_DEBUG > 0
         Serial.println("\nbeginCAD(): Start - rxSignalDetected!");
 #endif
@@ -231,11 +237,11 @@ bool LRTP::beginCAD()
 void LRTP::sendPacket(const LRTPPacket &packet)
 {
 #if LRTP_DEBUG > 1
-    Serial.printf("%s: Sending Packet. length: %d. Src: %d, Dest: %u Seq: %u, Ack: %u\n", __PRETTY_FUNCTION__, packet.payload_length, packet.src, packet.dest, packet.seqNum, packet.ackNum);
+    Serial.printf("%s: Sending Packet. length: %d. Src: %d, Dest: %u Seq: %u, Ack: %u\n", __PRETTY_FUNCTION__, packet.payloadLength, packet.src, packet.dest, packet.seqNum, packet.ackNum);
 #endif
-    m_currentLoRaState = LoRaState::TRANSMIT;
+    setState(LoRaState::TRANSMIT);
 
-    uint8_t verAndType = (packet.version << 0x04) | (packet.type & 0x0f);
+    uint8_t verAndType = (packet.version << 0x04) | (packet.payloadType & 0x0f);
     uint8_t flagsAndWindow = (packFlags(packet.flags) << 0x04) | (packet.ackWindow & 0x0f);
     // convert src and dest addresses from host to network order (big-endian)
     uint16_t src_no = htons(packet.src);
@@ -255,14 +261,14 @@ void LRTP::sendPacket(const LRTPPacket &packet)
     LoRa.write(dest_lo);
     LoRa.write(packet.seqNum);
     LoRa.write(packet.ackNum);
-    LoRa.write(packet.payload, packet.payload_length);
+    LoRa.write(packet.payload, packet.payloadLength);
     LoRa.endPacket(true);
 }
 
 // handlers for LoRa async
 void LRTP::onLoRaPacketReceived(int packetSize)
 {
-#if LRTP_DEBUG > 0
+#if LRTP_DEBUG > 1
     Serial.printf("%s: Received Packet of length: %d!\n", __PRETTY_FUNCTION__, packetSize);
 #endif
     // read packet into buffer
@@ -282,7 +288,7 @@ void LRTP::onLoRaTxDone()
 #if LRTP_DEBUG > 0
     Serial.printf("%s: TX Done\n", __PRETTY_FUNCTION__);
 #endif
-    m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+    setState(LoRaState::IDLE_RECEIVE);
     // put radio back into receive mode
     LoRa.receive();
 }
@@ -290,14 +296,14 @@ void LRTP::onLoRaTxDone()
 void LRTP::onLoRaCADDone(bool channelBusy)
 {
 #if LRTP_DEBUG > 1
-    Serial.printf("%u (%u) ", channelBusy, m_cadRoundsRemaining);
+    Serial.printf("CAD %s (%u) ", channelBusy ? "BUSY" : "", m_cadRoundsRemaining);
 #endif
     m_channelActive = channelBusy;
     if (channelBusy)
     {
         // finish early if channel is busy and enter receive mode to receive the incoming packet
         m_checkReceiveRounds = LORA_SIGNAL_TIMEOUT_ROUNDS;
-        m_currentLoRaState = LoRaState::RECEIVE;
+        setState(LoRaState::RECEIVE);
         LoRa.receive();
 #if LRTP_DEBUG > 0
         Serial.printf("\nCAD (%u/%u) interrupted!\n", LRTP_CAD_ROUNDS - m_cadRoundsRemaining, LRTP_CAD_ROUNDS);
@@ -312,8 +318,8 @@ void LRTP::onLoRaCADDone(bool channelBusy)
     }
     else
     {
-        m_currentLoRaState = LoRaState::CAD_FINISHED;
-#if LRTP_DEBUG > 0
+        setState(LoRaState::CAD_FINISHED);
+#if LRTP_DEBUG > 1
         Serial.println("CAD Finished");
 #endif
     }
@@ -332,7 +338,7 @@ void LRTP::handleReceiveTimeout(unsigned long t)
         else if (m_checkReceiveRounds <= 1)
         {
             // no signal has been detected, switch back to idle state
-            m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+            setState(LoRaState::IDLE_RECEIVE);
         }
         else
         {
@@ -344,8 +350,10 @@ void LRTP::handleReceiveTimeout(unsigned long t)
 
 void LRTP::handleCADDone(unsigned long t)
 {
-    // transmit after CAD finishes
-    // Serial.printf("%s: CAD finished, channel busy: %u\n    Sending packet...\n", __PRETTY_FUNCTION__, m_channelActive);
+// transmit after CAD finishes
+#if LRTP_DEBUG > 1
+    Serial.printf("CAD finished: Busy: %u.\n", m_channelActive);
+#endif
     LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket(t);
     if (p != nullptr)
     {
@@ -357,15 +365,23 @@ void LRTP::handleCADDone(unsigned long t)
     else
     {
         Serial.printf("%s: ERROR: Transmit packet was null!\n", __PRETTY_FUNCTION__);
-        m_currentLoRaState = LoRaState::IDLE_RECEIVE;
+        setState(LoRaState::IDLE_RECEIVE);
     }
+}
+
+void LRTP::setState(LoRaState newState)
+{
+#if LRTP_DEBUG > 0
+    Serial.printf("%s: LORA Radio Change State: %s -> %s\n", __PRETTY_FUNCTION__, LORAStateToStr(m_currentLoRaState), LORAStateToStr(newState));
+#endif
+    m_currentLoRaState = newState;
 }
 
 // ======= DEBUG METHODS =======
 void debug_print_packet(const LRTPPacket &packet)
 {
     Serial.printf("Version: %u (0x%02X)\n", packet.version, packet.version);
-    Serial.printf("Type: %u (0x%02X)\n", packet.type, packet.type);
+    Serial.printf("Type: %u (0x%02X)\n", packet.payloadType, packet.payloadType);
     Serial.printf("Flags: (0x%02X) ", LRTP::packFlags(packet.flags));
     if (packet.flags.syn)
     {
@@ -397,16 +413,41 @@ void debug_print_packet(const LRTPPacket &packet)
     Serial.printf("Destination: %u (0x%04X)\n", packet.dest, packet.dest);
     Serial.printf("Sequence Num: %u (0x%02X)\n", packet.seqNum, packet.seqNum);
     Serial.printf("Acknowledgment Num: %u (0x%02X)\n", packet.ackNum, packet.ackNum);
-    Serial.printf("Payload: (%u bytes)\n", packet.payload_length);
-    for (int i = 0; i < packet.payload_length; i++)
+    Serial.printf("Payload: (%u bytes)\n", packet.payloadLength);
+    for (int i = 0; i < packet.payloadLength; i++)
     {
         Serial.print(packet.payload[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
-    for (int i = 0; i < packet.payload_length; i++)
+    for (int i = 0; i < packet.payloadLength; i++)
     {
         Serial.print((char)packet.payload[i]);
     }
     Serial.println();
+}
+
+const char *LORAStateToStr(LoRaState state)
+{
+    switch (state)
+    {
+    case LoRaState::IDLE_RECEIVE:
+        return "IDLE_RECEIVE";
+        break;
+    case LoRaState::RECEIVE:
+        return "RECEIVE";
+        break;
+    case LoRaState::CAD_STARTED:
+        return "CAD_STARTED";
+        break;
+    case LoRaState::CAD_FINISHED:
+        return "CAD_FINISHED";
+        break;
+    case LoRaState::TRANSMIT:
+        return "TRANSMIT";
+        break;
+    default:
+        return "Invalid State";
+        break;
+    }
 }

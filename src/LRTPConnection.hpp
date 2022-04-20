@@ -24,21 +24,34 @@ public:
     using Print::write; // include "Print" methods
     virtual void flush() override;
 
-    void update(unsigned long t);
+    /**
+     * @brief opens the connection if it is currently closed (Sends SYN packet)
+     *
+     * @return true if the connection is closed and the operation succeeded
+     * @return false if the connection is open or the operation failed
+     */
+    bool connect();
+
+    bool close();
+
+    void updateTimers(unsigned long t);
     /**
      * @brief Checks if the current connection is ready to transmit a packet or not
      *
      * @return true if the current connection can send another packet
      * @return false if no data or control packets are ready to send
      */
-    bool isReadyForTransmit(unsigned long t);
+    bool isReadyForTransmit();
 
     // packet handling methods
     void handleIncomingPacket(const LRTPPacket &packet);
 
-    LRTPPacket *getNextTxPacket(unsigned long t);
+    // LRTPPacket *getNextTxPacket(unsigned long t);
+    LRTPPacket *getNextTxPacket();
 
     uint16_t getRemoteAddr();
+
+    LRTPConnState getConnectionState();
 
 private:
     // connection variables
@@ -78,7 +91,7 @@ private:
     size_t m_rxBuffPos = 0;
     size_t m_rxBuffLen = 0;
 
-    LRTPConnState m_state;
+    LRTPConnState m_connectionState;
 
     std::function<void()> m_onDataReceived = nullptr;
 
@@ -91,9 +104,22 @@ private:
 
     void setTxPacketHeader(LRTPPacket &packet);
 
+    void setConnectionState(LRTPConnState newState);
+
+    void startPacketTimeoutTimer();
+    void onPacketTimeout();
+    void startPiggybackTimeoutTimer();
+    void onPiggybackTimeout();
     // LRTPPacket *preparePiggybackPacket();
     // LRTPBufferItem *m_currTxBuffer = nullptr;
+    bool handleStateClosed(const LRTPPacket &packet);
     bool handleStateConnectSYN(const LRTPPacket &packet);
     bool handleStateConnectSYNACK(const LRTPPacket &packet);
     bool handleStateConnected(const LRTPPacket &packet);
+
+    void handlePacketAckFlag(const LRTPPacket &packet);
+    void advanceSendWindow(uint8_t ackNum);
 };
+
+/* ========== Debug methods ==========*/
+const char *connStateToStr(LRTPConnState state);

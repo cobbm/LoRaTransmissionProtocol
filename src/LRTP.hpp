@@ -87,6 +87,8 @@ private:
     // handles the transmision of a packet during the loop
     void loopTransmit();
 
+    void setState(LoRaState newState);
+
     /**
      * @brief starts channel activity detection before transmitting a packet. switches to CAD_STARTED state.
      * If this is called while a packet is being received, switches state to RECEIVE and doesn't start CAD
@@ -110,4 +112,6 @@ private:
     void onLoRaCADDone(bool channelBusy);
 };
 
+/* ========== Debug methods ==========*/
 void debug_print_packet(const LRTPPacket &packet);
+const char *LORAStateToStr(LoRaState state);
