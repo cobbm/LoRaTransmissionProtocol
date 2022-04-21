@@ -2,7 +2,7 @@
 
 // #include "CircularBuffer.hpp"
 
-LRTPConnection::LRTPConnection(uint16_t source, uint16_t destination) : m_srcAddr(source), m_destAddr(destination), m_nextSeqNum(0), m_nextAckNum(0), m_currentAckNum(m_nextAckNum - 1), m_seqBase(0), m_windowSize(LRTP_TX_PACKET_BUFFER_SZ), m_txDataBuffer(LRTP_MAX_PAYLOAD_SZ * LRTP_TX_PACKET_BUFFER_SZ), m_txWindow(m_windowSize), m_connectionState(LRTPConnState::CLOSED)
+LRTPConnection::LRTPConnection(uint16_t source, uint16_t destination) : m_srcAddr(source), m_destAddr(destination), m_currentSeqNum(0), m_nextAckNum(0), m_seqBase(0), m_windowSize(LRTP_TX_PACKET_BUFFER_SZ), m_txDataBuffer(LRTP_MAX_PAYLOAD_SZ * LRTP_TX_PACKET_BUFFER_SZ), m_txWindow(m_windowSize), m_connectionState(LRTPConnState::CLOSED)
 {
     // set piggyback packet data to default
     m_piggybackPacket.payloadLength = 0;
@@ -73,8 +73,8 @@ bool LRTPConnection::connect()
         return false;
 
     // set up a new random sequence number
-    m_nextSeqNum = random(0, 256);
-    m_seqBase = m_nextSeqNum;
+    m_currentSeqNum = random(0, 256);
+    m_seqBase = m_currentSeqNum;
     // send SYN-ACK
     m_piggybackFlags = {
         .syn = true,
@@ -82,6 +82,8 @@ bool LRTPConnection::connect()
         .ack = false,
     };
     m_sendPiggybackPacket = true;
+    // start timeout timer
+    startPacketTimeoutTimer();
     // set state to CONNECT_SYN
     setConnectionState(LRTPConnState::CONNECT_SYN);
     return true;
@@ -123,9 +125,9 @@ bool LRTPConnection::isReadyForTransmit()
     bool dataWaitingForTransmit = m_txDataBuffer.count() > 0;
     bool connectionOpen = m_connectionState == LRTPConnState::CONNECTED;
 
-    size_t positionInWindow = m_nextSeqNum - m_seqBase;
+    size_t positionInWindow = m_currentSeqNum - m_seqBase;
 
-    bool canTransmitData = connectionOpen && dataWaitingForTransmit && (positionInWindow < m_txWindow.count() || m_txWindow.count() < m_windowSize);
+    bool canTransmitData = connectionOpen && ((dataWaitingForTransmit && positionInWindow < m_windowSize) || (positionInWindow < m_txWindow.count()));
 
     return /*packetTimeout || piggybackTimeout ||*/ m_sendPiggybackPacket || canTransmitData;
 }
@@ -175,101 +177,17 @@ LRTPPacket *LRTPConnection::prepareNextPacket()
 
 LRTPPacket *LRTPConnection::getNextTxPacket()
 {
-    /*
-    // handle timeout
-    if (m_timer_packetTimeoutActive && t - m_timer_packetTimeout > LRTP_PACKET_TIMEOUT)
-    {
-#if LRTP_DEBUG > 0
-        Serial.printf("%s: === TIMEOUT %u ===\n", __PRETTY_FUNCTION__, m_packetRetries);
-#endif
-        // reset nextsequencenumber to the start of the window
-        m_nextSeqNum = m_seqBase;
-        // m_timer_packetTimeout = t;
-        m_timer_packetTimeoutActive = false;
-        m_packetRetries++;
-    }
-    // handle piggyback timeout
-    if (m_timer_piggybackTimeoutActive && t - m_timer_piggybackTimeout > LRTP_PIGGYBACK_TIMEOUT)
-    {
-        m_timer_packetTimeoutActive = false;
-        m_sendPiggybackPacket = true;
-    }
-    */
-
-    /*
-        LRTPPacket *nextPacket = nullptr;
-        // implement ARQ Go Back N
-        if (m_nextSeqNum < m_seqBase + m_windowSize)
-        {
-            // entire window not sent yet
-
-            // check if we are ready for the next packet
-            if (m_nextSeqNum < m_seqBase + m_txWindow.count())
-            {
-                // get packet from buffer
-                nextPacket = m_txWindow[m_nextSeqNum - m_seqBase];
-            }
-            else
-            {
-                // fill buffer with next packet to send
-                nextPacket = prepareNextPacket();
-            }
-            if (nextPacket != nullptr)
-            {
-                // check if we have started a timer for piggyback packets.
-                // if so, we can stop the timer and send the data along with this packet
-                if (m_timer_piggybackTimeoutActive)
-                {
-                    m_timer_piggybackTimeoutActive = false;
-                    m_sendPiggybackPacket = true;
-                }
-
-                setTxPacketHeader(*nextPacket);
-                // start the packet timeout timer
-                startPacketTimeoutTimer();
-                // increment sequence number
-                m_nextSeqNum += 1;
-                // return nextPacket;
-            }
-            else
-            {
-    #if LRTP_DEBUG > 2
-                Serial.printf("%s: Warning: Packet was null!\n", __PRETTY_FUNCTION__);
-    #endif
-                //  return nullptr;
-            }
-        }
-        else if (m_sendPiggybackPacket)
-        {
-            // check if we need to send a piggyback packet (piggyback timer has elapsed)
-    #if LRTP_DEBUG > 2
-            Serial.printf("%s: piggybacking!\n", __PRETTY_FUNCTION__);
-    #endif
-            // we need to force send a piggyback packet.
-            // these packets don't need to be buffered as they do not increment sequence number and are not acknowledged by the other party
-
-            setTxPacketHeader(m_piggybackPacket);
-            nextPacket = &m_piggybackPacket;
-            // m_sendPiggybackPacket = false;
-        }
-    #if LRTP_DEBUG > 2
-        if (nextPacket == nullptr)
-            Serial.printf("ERROR: Could not get next packet!\n");
-    #endif
-        return nextPacket;
-
-        */
     LRTPPacket *nextPacket = nullptr;
     // implement ARQ Go Back N
-    if (m_nextSeqNum < m_seqBase + m_windowSize)
+    if (m_currentSeqNum < m_seqBase + m_windowSize)
     {
         // entire window not sent yet
 
         // check if we are ready for the next packet
-        if (m_nextSeqNum < m_seqBase + m_txWindow.count())
+        if (m_currentSeqNum < m_seqBase + m_txWindow.count())
         {
             // get packet from buffer
-            nextPacket = m_txWindow[m_nextSeqNum - m_seqBase];
+            nextPacket = m_txWindow[m_currentSeqNum - m_seqBase];
         }
         else
         {
@@ -277,18 +195,30 @@ LRTPPacket *LRTPConnection::getNextTxPacket()
             nextPacket = prepareNextPacket();
         }
     }
-    else if (m_sendPiggybackPacket)
+    if (nextPacket == nullptr && m_sendPiggybackPacket)
     {
         nextPacket = &m_piggybackPacket;
     }
     if (nextPacket != nullptr)
     {
-        setTxPacketHeader(*nextPacket);
+
         // set FIN flag on final packet if closing connection
-        if (m_connectionState == LRTPConnState::CLOSE_FIN && m_nextSeqNum >= m_seqBase + m_txWindow.count())
+        if (m_connectionState == LRTPConnState::CLOSE_FIN && m_currentSeqNum >= m_seqBase + m_txWindow.count())
         {
+#if LRTP_DEBUG > 0
+            Serial.printf("%s: FINAL PACKET Seq: %u\n", __PRETTY_FUNCTION__, m_currentSeqNum);
+#endif
             m_sendPiggybackPacket = true;
             m_piggybackFlags.fin = true;
+        }
+
+        setTxPacketHeader(*nextPacket);
+        if (nextPacket->payloadLength > 0)
+        {
+            incrementSeqNum();
+
+            // start the timeout timer
+            startPacketTimeoutTimer();
         }
     }
     else
@@ -303,16 +233,10 @@ LRTPPacket *LRTPConnection::getNextTxPacket()
 void LRTPConnection::setTxPacketHeader(LRTPPacket &packet)
 {
     // set "dynamic" header fields (i.e. may change between retransmits)
-    // handle flags elsewhere?
     if (m_sendPiggybackPacket)
     {
         // TODO: Handle piggybacking
         packet.flags = m_piggybackFlags;
-        /*
-        m_piggybackFlags.ack = false;
-        m_piggybackFlags.fin = false;
-        m_piggybackFlags.syn = false;
-        */
         // we have handled the piggybacking
         m_sendPiggybackPacket = false;
         // stop the piggyback timer
@@ -324,24 +248,23 @@ void LRTPConnection::setTxPacketHeader(LRTPPacket &packet)
         packet.flags.syn = false;
         packet.flags.fin = false;
     }
-
     packet.ackWindow = m_windowSize;
 
-    packet.seqNum = m_nextSeqNum;
-    packet.ackNum = m_currentAckNum;
+    packet.seqNum = m_currentSeqNum;
+    packet.ackNum = m_nextAckNum;
 }
 
 bool LRTPConnection::handleStateClosed(const LRTPPacket &packet)
 {
-    Serial.printf(" ==== Handle %s === \n", connStateToStr(m_connectionState));
-    if (packet.flags.syn && packet.payloadLength == 0)
+    if (packet.flags.syn && !packet.flags.ack && packet.payloadLength == 0)
     {
         // set up acknowledgement number
-        m_currentAckNum = packet.seqNum;
         m_nextAckNum = packet.seqNum + 1;
         // set random sequence number
-        m_nextSeqNum = random(0, 256);
-        m_seqBase = m_nextSeqNum;
+        m_currentSeqNum = random(0, 256);
+        m_currentSeqNum = 100;
+
+        m_seqBase = m_currentSeqNum;
         // send SYN-ACK
         m_piggybackFlags = {
             .syn = true,
@@ -352,13 +275,12 @@ bool LRTPConnection::handleStateClosed(const LRTPPacket &packet)
         // set state to CONNECT_SYN_ACK
         setConnectionState(LRTPConnState::CONNECT_SYN_ACK);
         // TODO: timeout
-        // startPacketTimeoutTimer();
+        startPacketTimeoutTimer();
         return true;
     }
     else
     {
         Serial.printf("%s: ERROR: Invalid SYN packet\n", __PRETTY_FUNCTION__);
-        // setConnectionState(LRTPConnState::CLOSE_END);
         setConnectionState(LRTPConnState::CLOSED);
         return false;
     }
@@ -366,38 +288,55 @@ bool LRTPConnection::handleStateClosed(const LRTPPacket &packet)
 
 bool LRTPConnection::handleStateConnectSYN(const LRTPPacket &packet)
 {
-    Serial.printf(" ==== Handle %s === \n", connStateToStr(m_connectionState));
-    return false;
-}
-
-bool LRTPConnection::handleStateConnectSYNACK(const LRTPPacket &packet)
-{
-    Serial.printf(" ==== Handle %s === \n", connStateToStr(m_connectionState));
-    // check if this is a repeat of the previous SYN packet
-    //  if (packet.flags.syn && packet.seqNum == m_currentAckNum){
-    //      //resend SYN ACK
-    //      m_piggybackFlags = {
-    //          .syn = true,
-    //          .fin = false,
-    //          .ack = true,
-    //      };
-    //      m_sendPiggybackPacket = true;
-    //      //TODO timeout:
-
-    //     return false;
-    // }
-    Serial.printf("m_currentAckNum: %u, m_nextAckNum: %u\n", m_currentAckNum, m_nextAckNum);
-    Serial.printf("m_nextSeqNum: %u\n", m_nextSeqNum);
-    if (packet.flags.ack && packet.seqNum == m_nextAckNum)
+    if (packet.flags.syn && packet.flags.ack && packet.ackNum == m_currentSeqNum + 1)
     {
-        m_nextSeqNum++;
-        m_seqBase = m_nextSeqNum;
+        m_nextAckNum = packet.seqNum + 1;
+
+        incrementSeqNum();
+        m_seqBase = m_currentSeqNum;
+        // send ACK (& data)
+        m_piggybackFlags = {
+            .syn = false,
+            .fin = false,
+            .ack = true,
+        };
+        // stop packet timeout timer
+        m_timer_packetTimeoutActive = false;
+
+        startPiggybackTimeoutTimer();
+        // set state to connected
         setConnectionState(LRTPConnState::CONNECTED);
         return true;
     }
     else
     {
-        Serial.printf("%s: Invalid packet! resend SYN ACK\n", __PRETTY_FUNCTION__);
+        Serial.printf("%s: ERROR: Invalid SYN/ACK packet. Resend SYN\n", __PRETTY_FUNCTION__);
+        // invalid packet, resend SYN ACK
+        m_piggybackFlags = {
+            .syn = true,
+            .fin = false,
+            .ack = false,
+        };
+        m_sendPiggybackPacket = true;
+        // start packet timeout:
+        startPacketTimeoutTimer();
+        return false;
+    }
+    return false;
+}
+
+bool LRTPConnection::handleStateConnectSYNACK(const LRTPPacket &packet)
+{
+    if (packet.flags.ack && packet.seqNum == m_nextAckNum)
+    {
+        incrementSeqNum();
+        m_seqBase = m_currentSeqNum;
+        setConnectionState(LRTPConnState::CONNECTED);
+        return true;
+    }
+    else
+    {
+        Serial.printf("%s: ERROR: Invalid ACK packet. Resend SYN/ACK\n", __PRETTY_FUNCTION__);
         // invalid packet, resend SYN ACK
         m_piggybackFlags = {
             .syn = true,
@@ -406,7 +345,7 @@ bool LRTPConnection::handleStateConnectSYNACK(const LRTPPacket &packet)
         };
         m_sendPiggybackPacket = true;
         // TODO timeout:
-        // startPacketTimeoutTimer();
+        startPacketTimeoutTimer();
 
         return false;
     }
@@ -414,7 +353,6 @@ bool LRTPConnection::handleStateConnectSYNACK(const LRTPPacket &packet)
 
 bool LRTPConnection::handleStateConnected(const LRTPPacket &packet)
 {
-    Serial.printf(" ==== Handle %s === \n", connStateToStr(m_connectionState));
     const bool hasPayload = packet.payloadLength > 0;
 
     if (packet.seqNum == m_nextAckNum)
@@ -422,17 +360,26 @@ bool LRTPConnection::handleStateConnected(const LRTPPacket &packet)
         // valid packet
         if (hasPayload)
         {
-            m_currentAckNum = m_nextAckNum;
+            // m_currentAckNum = m_nextAckNum;
             m_nextAckNum++;
         }
         if (packet.flags.ack)
         {
             handlePacketAckFlag(packet);
         }
+        if (packet.flags.fin)
+        {
+            setConnectionState(LRTPConnState::CLOSE_FIN);
+        }
         if (hasPayload)
         {
             // we need to send an ACK for this payload
-            m_piggybackFlags.ack = true;
+            // TODO: Check for BUG:
+            m_piggybackFlags = {
+                .syn = false,
+                .fin = false,
+                .ack = true,
+            };
             // start piggyback timer
             startPiggybackTimeoutTimer();
         }
@@ -440,9 +387,14 @@ bool LRTPConnection::handleStateConnected(const LRTPPacket &packet)
     }
     else
     {
+        Serial.printf("%s: WARNING: Invalid Sequence number: %u\n", __PRETTY_FUNCTION__, packet.seqNum);
         // packet has an invalid sequence number
         // send an ack for the last acknowledged sequence number to trigger a full resend of the remote transmit window.
-        m_piggybackFlags.ack = true;
+        m_piggybackFlags = {
+            .syn = false,
+            .fin = false,
+            .ack = true,
+        };
         // TODO: start piggyback timer
         startPiggybackTimeoutTimer();
         return false;
@@ -451,6 +403,9 @@ bool LRTPConnection::handleStateConnected(const LRTPPacket &packet)
 
 void LRTPConnection::handleIncomingPacket(const LRTPPacket &packet)
 {
+#if LRTP_DEBUG > 1
+    Serial.printf(" ==== Handle %s === \n", connStateToStr(m_connectionState));
+#endif
     bool validPacket = false;
     switch (m_connectionState)
     {
@@ -470,6 +425,9 @@ void LRTPConnection::handleIncomingPacket(const LRTPPacket &packet)
         validPacket = handleStateConnected(packet);
         break;
     case LRTPConnState::CLOSE_FIN:
+        validPacket = handleStateConnected(packet);
+        // if (validPacket) validPacket= handleStateCloseFIN(packet);
+        break;
 
     case LRTPConnState::CLOSE_FIN_ACK:
 
@@ -496,7 +454,7 @@ void LRTPConnection::handleIncomingPacket(const LRTPPacket &packet)
 
 void LRTPConnection::setConnectionState(LRTPConnState newState)
 {
-#if LRTP_DEBUG > 0
+#if LRTP_DEBUG > 1
     Serial.printf("%s: Connection change state: %s -> %s\n", __PRETTY_FUNCTION__, connStateToStr(m_connectionState), connStateToStr(newState));
 #endif
     m_connectionState = newState;
@@ -519,12 +477,15 @@ LRTPConnState LRTPConnection::getConnectionState()
 
 void LRTPConnection::advanceSendWindow(uint8_t ackNum)
 {
-    while (m_seqBase <= ackNum)
+    while (m_seqBase < ackNum)
     {
         // advance sliding window
         LRTPPacket *oldPacket = m_txWindow.dequeue();
         if (oldPacket != nullptr)
         {
+#if LRTP_DEBUG > 1
+            Serial.printf("%s: Acknowledge Seq: %u\n", __PRETTY_FUNCTION__, oldPacket->seqNum);
+#endif
             if (oldPacket->payload != nullptr)
             {
                 // free malloced payload buffer
@@ -533,8 +494,9 @@ void LRTPConnection::advanceSendWindow(uint8_t ackNum)
             m_seqBase++;
         }
     }
-    m_nextSeqNum = m_seqBase;
-    m_packetRetries = 0;
+    // Serial.printf("===== advanceSendWindow() m_currentSeqNum = %u =====\n", m_seqBase);
+    m_currentSeqNum = m_seqBase;
+    // m_packetRetries = 0;
     //} else if (packet.ackNum == ((m_seqBase-1) & 0xff)){
     //    //resend the entire window
     //}
@@ -546,13 +508,14 @@ void LRTPConnection::handlePacketAckFlag(const LRTPPacket &packet)
     m_timer_packetTimeoutActive = false;
 
     const size_t sendWindowCount = m_txWindow.count();
-    const int sendWindowEnd = m_seqBase + (sendWindowCount - 1);
+    const int sendWindowEnd = m_seqBase + (sendWindowCount);
     if (sendWindowCount > 0)
     {
         if (packet.ackNum >= m_seqBase && packet.ackNum <= sendWindowEnd)
         {
             if (packet.ackNum < sendWindowEnd)
             {
+                Serial.printf("%s: Entire window not ack'd - Packet ACK: %u, Base: %u, Window end: %u \n", __PRETTY_FUNCTION__, packet.ackNum, m_seqBase, sendWindowEnd);
                 // entire window was not acknowledged
                 // restart timeout timer
                 startPacketTimeoutTimer();
@@ -561,17 +524,22 @@ void LRTPConnection::handlePacketAckFlag(const LRTPPacket &packet)
             Serial.printf("Acknowledge %u -> %u\n", m_seqBase, packet.ackNum);
 #endif
             advanceSendWindow(packet.ackNum);
+            m_packetRetries = 0;
         }
         else
         {
             // resend entire window
-            m_nextSeqNum = m_seqBase;
+            Serial.printf("===== m_currentSeqNum = %u ===== (RESEND ENTIRE WINDOW) \n", m_seqBase);
+            m_currentSeqNum = m_seqBase;
         }
     }
 }
 
 void LRTPConnection::startPacketTimeoutTimer()
 {
+#if LRTP_DEBUG > 1
+    Serial.printf("== Start Packet Timeout Timer ==\n");
+#endif
     m_timer_packetTimeoutActive = true;
     m_timer_packetTimeout = millis();
 }
@@ -579,23 +547,43 @@ void LRTPConnection::onPacketTimeout()
 {
     // handle timeout
 #if LRTP_DEBUG > 0
-    Serial.printf("%s: === TIMEOUT %u ===\n", __PRETTY_FUNCTION__, m_packetRetries);
+    Serial.printf("== Packet TIMEOUT [%u] ==\n", m_packetRetries);
 #endif
-    // reset nextsequencenumber to the start of the window
-    m_nextSeqNum = m_seqBase;
-    // m_timer_packetTimeout = t;
-    m_timer_packetTimeoutActive = false;
+    if (m_connectionState == LRTPConnState::CONNECT_SYN || m_connectionState == LRTPConnState::CONNECT_SYN_ACK)
+    {
+        m_sendPiggybackPacket = true;
+        startPacketTimeoutTimer();
+    }
+    else
+    {
+        // reset nextsequencenumber to the start of the window
+        m_currentSeqNum = m_seqBase;
+        // m_timer_packetTimeout = t;
+        m_timer_packetTimeoutActive = false;
+    }
     m_packetRetries++;
 }
+
 void LRTPConnection::startPiggybackTimeoutTimer()
 {
-    m_timer_packetTimeoutActive = true;
+#if LRTP_DEBUG > 1
+    Serial.printf("== Start Piggyback Timeout Timer ==\n");
+#endif
+    m_timer_piggybackTimeoutActive = true;
     m_timer_piggybackTimeout = millis();
 }
 void LRTPConnection::onPiggybackTimeout()
 {
-    m_timer_packetTimeoutActive = false;
+#if LRTP_DEBUG > 1
+    Serial.printf("== Piggyback Timer TIMEOUT ==\n");
+#endif
+    m_timer_piggybackTimeoutActive = false;
     m_sendPiggybackPacket = true;
+}
+
+void LRTPConnection::incrementSeqNum()
+{
+    m_currentSeqNum++;
 }
 
 /* ========== Debug methods ==========*/

@@ -75,10 +75,10 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
 
 void LRTP::handleIncomingPacket(const LRTPPacket &packet)
 {
-// Serial.printf("%s: Handling packet:\n", __PRETTY_FUNCTION__);
 // debug_print_packet(packet);
-#if LRTP_DEBUG > 0
-    Serial.printf("%s: Handling packet from: %u, Seq:%u, Ack:%u\n", __PRETTY_FUNCTION__, packet.src, packet.seqNum, packet.ackNum);
+#if LRTP_DEBUG > 1
+    Serial.printf("%s: Handling packet:\n", __PRETTY_FUNCTION__);
+    debug_print_packet_header(packet);
 #endif
 
     // find connection pertaining to this packet
@@ -95,7 +95,7 @@ void LRTP::handleIncomingPacket(const LRTPPacket &packet)
 
 void LRTP::handleIncomingConnectionPacket(const LRTPPacket &packet)
 {
-    Serial.printf("%s: Handling Connection packet:\n", __PRETTY_FUNCTION__);
+    // Serial.printf("%s: Handling Connection packet:\n", __PRETTY_FUNCTION__);
     if (packet.flags.syn && packet.payloadLength == 0)
     {
         std::shared_ptr<LRTPConnection> newConnection = std::make_shared<LRTPConnection>(m_hostAddr, packet.src);
@@ -354,11 +354,15 @@ void LRTP::handleCADDone(unsigned long t)
 #if LRTP_DEBUG > 1
     Serial.printf("CAD finished: Busy: %u.\n", m_channelActive);
 #endif
-    LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket(t);
+    LRTPPacket *p = m_nextConnectionForTransmit->getNextTxPacket();
     if (p != nullptr)
     {
 #if LRTP_DEBUG > 3
         debug_print_packet(*p);
+#else
+#if LRTP_DEBUG > 1
+        debug_print_packet_header(*p);
+#endif
 #endif
         sendPacket(*p);
     }
@@ -371,7 +375,7 @@ void LRTP::handleCADDone(unsigned long t)
 
 void LRTP::setState(LoRaState newState)
 {
-#if LRTP_DEBUG > 0
+#if LRTP_DEBUG > 2
     Serial.printf("%s: LORA Radio Change State: %s -> %s\n", __PRETTY_FUNCTION__, LORAStateToStr(m_currentLoRaState), LORAStateToStr(newState));
 #endif
     m_currentLoRaState = newState;
@@ -425,6 +429,41 @@ void debug_print_packet(const LRTPPacket &packet)
         Serial.print((char)packet.payload[i]);
     }
     Serial.println();
+}
+
+void debug_print_packet_header(const LRTPPacket &packet)
+{
+    Serial.printf("Src: %u (0x%04X) ", packet.src, packet.src);
+    Serial.printf("Dest: %u (0x%04X) ", packet.dest, packet.dest);
+    Serial.printf("Flags: (0x%02X) ", LRTP::packFlags(packet.flags));
+    if (packet.flags.syn)
+    {
+        Serial.print("S ");
+    }
+    else
+    {
+        Serial.print("- ");
+    }
+    if (packet.flags.fin)
+    {
+        Serial.print("F ");
+    }
+    else
+    {
+        Serial.print("- ");
+    }
+    if (packet.flags.ack)
+    {
+        Serial.print("A ");
+    }
+    else
+    {
+        Serial.print("- ");
+    }
+    Serial.printf("X ");
+    Serial.printf("Seq: %u (0x%02X) ", packet.seqNum, packet.seqNum);
+    Serial.printf("Ack: %u (0x%02X) ", packet.ackNum, packet.ackNum);
+    Serial.printf("\t\tPayload Length: %u\n", packet.payloadLength);
 }
 
 const char *LORAStateToStr(LoRaState state)

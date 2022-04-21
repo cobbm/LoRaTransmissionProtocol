@@ -114,4 +114,6 @@ private:
 
 /* ========== Debug methods ==========*/
 void debug_print_packet(const LRTPPacket &packet);
+void debug_print_packet_header(const LRTPPacket &packet);
+
 const char *LORAStateToStr(LoRaState state);

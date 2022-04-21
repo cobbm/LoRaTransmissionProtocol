@@ -58,13 +58,11 @@ private:
     uint16_t m_srcAddr;
     uint16_t m_destAddr;
 
-    uint8_t m_nextSeqNum;
+    uint8_t m_currentSeqNum;
 
     uint8_t m_nextAckNum;
-    uint8_t m_currentAckNum;
 
     uint8_t m_seqBase;
-    // uint8_t m_nextSeqNum;
     uint8_t m_windowSize;
 
     uint8_t m_remoteWindowSize = 0;
@@ -119,6 +117,8 @@ private:
 
     void handlePacketAckFlag(const LRTPPacket &packet);
     void advanceSendWindow(uint8_t ackNum);
+
+    inline void incrementSeqNum();
 };
 
 /* ========== Debug methods ==========*/
