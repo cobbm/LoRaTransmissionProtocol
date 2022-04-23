@@ -74,6 +74,7 @@ bool LRTPConnection::connect()
 
     // set up a new random sequence number
     m_currentSeqNum = random(0, 256);
+    // m_currentSeqNum = 248;
     m_seqBase = m_currentSeqNum;
     // send SYN-ACK
     m_piggybackFlags = {
@@ -101,6 +102,7 @@ bool LRTPConnection::close()
     */
 
     setConnectionState(LRTPConnState::CLOSE_FIN);
+    return true;
 }
 
 void LRTPConnection::updateTimers(unsigned long t)
@@ -125,7 +127,7 @@ bool LRTPConnection::isReadyForTransmit()
     bool dataWaitingForTransmit = m_txDataBuffer.count() > 0;
     bool connectionOpen = m_connectionState == LRTPConnState::CONNECTED;
 
-    size_t positionInWindow = m_currentSeqNum - m_seqBase;
+    uint8_t positionInWindow = m_currentSeqNum - m_seqBase;
 
     bool canTransmitData = connectionOpen && ((dataWaitingForTransmit && positionInWindow < m_windowSize) || (positionInWindow < m_txWindow.count()));
 
@@ -178,16 +180,16 @@ LRTPPacket *LRTPConnection::prepareNextPacket()
 LRTPPacket *LRTPConnection::getNextTxPacket()
 {
     LRTPPacket *nextPacket = nullptr;
+    const uint8_t relativeSeqNo = m_currentSeqNum - m_seqBase;
     // implement ARQ Go Back N
-    if (m_currentSeqNum < m_seqBase + m_windowSize)
+    if (relativeSeqNo < m_windowSize)
     {
         // entire window not sent yet
-
         // check if we are ready for the next packet
-        if (m_currentSeqNum < m_seqBase + m_txWindow.count())
+        if (relativeSeqNo < m_txWindow.count())
         {
             // get packet from buffer
-            nextPacket = m_txWindow[m_currentSeqNum - m_seqBase];
+            nextPacket = m_txWindow[relativeSeqNo];
         }
         else
         {
@@ -203,7 +205,7 @@ LRTPPacket *LRTPConnection::getNextTxPacket()
     {
 
         // set FIN flag on final packet if closing connection
-        if (m_connectionState == LRTPConnState::CLOSE_FIN && m_currentSeqNum >= m_seqBase + m_txWindow.count())
+        if (m_connectionState == LRTPConnState::CLOSE_FIN && relativeSeqNo >= m_txWindow.count())
         {
 #if LRTP_DEBUG > 0
             Serial.printf("%s: FINAL PACKET Seq: %u\n", __PRETTY_FUNCTION__, m_currentSeqNum);
@@ -262,7 +264,7 @@ bool LRTPConnection::handleStateClosed(const LRTPPacket &packet)
         m_nextAckNum = packet.seqNum + 1;
         // set random sequence number
         m_currentSeqNum = random(0, 256);
-        m_currentSeqNum = 100;
+        // m_currentSeqNum = 248;
 
         m_seqBase = m_currentSeqNum;
         // send SYN-ACK
@@ -475,9 +477,10 @@ LRTPConnState LRTPConnection::getConnectionState()
     return m_connectionState;
 }
 
-void LRTPConnection::advanceSendWindow(uint8_t ackNum)
+void LRTPConnection::advanceSendWindow(uint16_t ackNum)
 {
-    while (m_seqBase < ackNum)
+    uint16_t longSeqBase = m_seqBase;
+    while (longSeqBase < ackNum)
     {
         // advance sliding window
         LRTPPacket *oldPacket = m_txWindow.dequeue();
@@ -491,10 +494,11 @@ void LRTPConnection::advanceSendWindow(uint8_t ackNum)
                 // free malloced payload buffer
                 free(oldPacket->payload);
             }
-            m_seqBase++;
+            longSeqBase++;
         }
     }
     // Serial.printf("===== advanceSendWindow() m_currentSeqNum = %u =====\n", m_seqBase);
+    m_seqBase = longSeqBase;
     m_currentSeqNum = m_seqBase;
     // m_packetRetries = 0;
     //} else if (packet.ackNum == ((m_seqBase-1) & 0xff)){
@@ -508,12 +512,18 @@ void LRTPConnection::handlePacketAckFlag(const LRTPPacket &packet)
     m_timer_packetTimeoutActive = false;
 
     const size_t sendWindowCount = m_txWindow.count();
-    const int sendWindowEnd = m_seqBase + (sendWindowCount);
+    const uint16_t sendWindowEnd = m_seqBase + sendWindowCount;
+
+    uint16_t adjustedAckNum = packet.ackNum;
+    const bool ackMayOverflow = (sendWindowEnd & 0xff) < m_seqBase;
+    if (ackMayOverflow)
+        adjustedAckNum += 256;
+
     if (sendWindowCount > 0)
     {
-        if (packet.ackNum >= m_seqBase && packet.ackNum <= sendWindowEnd)
+        if (adjustedAckNum >= m_seqBase && adjustedAckNum <= sendWindowEnd)
         {
-            if (packet.ackNum < sendWindowEnd)
+            if (adjustedAckNum < sendWindowEnd)
             {
                 Serial.printf("%s: Entire window not ack'd - Packet ACK: %u, Base: %u, Window end: %u \n", __PRETTY_FUNCTION__, packet.ackNum, m_seqBase, sendWindowEnd);
                 // entire window was not acknowledged
@@ -523,7 +533,7 @@ void LRTPConnection::handlePacketAckFlag(const LRTPPacket &packet)
 #if LRTP_DEBUG > 2
             Serial.printf("Acknowledge %u -> %u\n", m_seqBase, packet.ackNum);
 #endif
-            advanceSendWindow(packet.ackNum);
+            advanceSendWindow(adjustedAckNum);
             m_packetRetries = 0;
         }
         else

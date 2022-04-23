@@ -116,7 +116,7 @@ private:
     bool handleStateConnected(const LRTPPacket &packet);
 
     void handlePacketAckFlag(const LRTPPacket &packet);
-    void advanceSendWindow(uint8_t ackNum);
+    void advanceSendWindow(uint16_t ackNum);
 
     inline void incrementSeqNum();
 };
