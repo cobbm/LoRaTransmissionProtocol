@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
+#define DEBUG 1
 /**
  * @brief Simple circular buffer implementation
  *
@@ -32,6 +33,9 @@ public:
 
     ~CircularBuffer()
     {
+#if DEBUG > 0
+        Serial.println("CircularBuffer<T>: Destructor called");
+#endif
         delete[] this->m_buffer;
     };
 

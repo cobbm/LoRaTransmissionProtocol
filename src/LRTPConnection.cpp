@@ -13,6 +13,23 @@ LRTPConnection::LRTPConnection(uint16_t source, uint16_t destination) : m_srcAdd
     m_piggybackPacket.dest = m_destAddr;
 }
 
+LRTPConnection::~LRTPConnection()
+{
+#if LRTP_DEBUG > 0
+    Serial.println("LRTPConnection: Destructor called");
+#endif
+    // free the payload buffers for all packets still in the transmit buffer
+    LRTPPacket *p = m_txWindow.dequeue();
+    while (p != nullptr)
+    {
+        if (p->payload != nullptr)
+        {
+            free(p->payload);
+        }
+        p = m_txWindow.dequeue();
+    }
+}
+
 // Stream implementation
 int LRTPConnection::read()
 {
@@ -54,7 +71,7 @@ size_t LRTPConnection::write(const uint8_t *buf, size_t size)
 {
     // Serial.printf("Stream wrote (str): %s\n", buf);
     // TODO: Improve this
-    int i;
+    unsigned int i;
     for (i = 0; i < size; i++)
     {
         if (!write(buf[i]))
@@ -65,6 +82,16 @@ size_t LRTPConnection::write(const uint8_t *buf, size_t size)
 
 void LRTPConnection::flush() {}
 
+int LRTPConnection::availableForWrite()
+{
+    // data may be written in either connected or connect_syn_ack state
+    if (m_connectionState == LRTPConnState::CONNECT_SYN_ACK || m_connectionState == LRTPConnState::CONNECTED)
+    {
+        return m_txDataBuffer.size() - m_txDataBuffer.count();
+    }
+    return -1;
+};
+
 // end print implementation
 
 bool LRTPConnection::connect()
@@ -74,7 +101,6 @@ bool LRTPConnection::connect()
 
     // set up a new random sequence number
     m_currentSeqNum = random(0, 256);
-    // m_currentSeqNum = 248;
     m_seqBase = m_currentSeqNum;
     // send SYN-ACK
     m_piggybackFlags = {
@@ -103,6 +129,26 @@ bool LRTPConnection::close()
 
     setConnectionState(LRTPConnState::CLOSE_FIN);
     return true;
+}
+
+void LRTPConnection::onDataReceived(std::function<void(void)> callback)
+{
+    m_onDataReceived = callback;
+}
+
+void LRTPConnection::onClose(std::function<void(void)> callback)
+{
+    m_onClose = callback;
+}
+
+uint16_t LRTPConnection::getRemoteAddr()
+{
+    return m_destAddr;
+}
+
+LRTPConnState LRTPConnection::getConnectionState()
+{
+    return m_connectionState;
 }
 
 void LRTPConnection::updateTimers(unsigned long t)
@@ -264,7 +310,6 @@ bool LRTPConnection::handleStateClosed(const LRTPPacket &packet)
         m_nextAckNum = packet.seqNum + 1;
         // set random sequence number
         m_currentSeqNum = random(0, 256);
-        // m_currentSeqNum = 248;
 
         m_seqBase = m_currentSeqNum;
         // send SYN-ACK
@@ -460,21 +505,6 @@ void LRTPConnection::setConnectionState(LRTPConnState newState)
     Serial.printf("%s: Connection change state: %s -> %s\n", __PRETTY_FUNCTION__, connStateToStr(m_connectionState), connStateToStr(newState));
 #endif
     m_connectionState = newState;
-}
-
-void LRTPConnection::onDataReceived(std::function<void()> callback)
-{
-    m_onDataReceived = callback;
-}
-
-uint16_t LRTPConnection::getRemoteAddr()
-{
-    return m_destAddr;
-}
-
-LRTPConnState LRTPConnection::getConnectionState()
-{
-    return m_connectionState;
 }
 
 void LRTPConnection::advanceSendWindow(uint16_t ackNum)

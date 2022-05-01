@@ -6,15 +6,21 @@ LRTP::LRTP(uint16_t m_hostAddr) : m_hostAddr(m_hostAddr), m_currentLoRaState(LoR
 
 std::shared_ptr<LRTPConnection> LRTP::connect(uint16_t destAddr)
 {
+    std::shared_ptr<LRTPConnection> connection = nullptr;
     // check if connection exists
-    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator connection = m_activeConnections.find(destAddr);
-    if (connection != m_activeConnections.end())
+    std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator connection_iter = m_activeConnections.find(destAddr);
+    if (connection_iter != m_activeConnections.end())
     {
-        return connection->second;
+        connection = connection_iter->second;
     }
-    std::shared_ptr<LRTPConnection> newConnection = std::make_shared<LRTPConnection>(m_hostAddr, destAddr);
-    m_activeConnections[destAddr] = newConnection;
-    return newConnection;
+    else
+    {
+        connection = std::make_shared<LRTPConnection>(m_hostAddr, destAddr);
+        m_activeConnections[destAddr] = connection;
+        if (connection->getConnectionState() == LRTPConnState::CLOSED)
+            connection->connect();
+    }
+    return connection;
 }
 
 int LRTP::begin()
@@ -418,13 +424,13 @@ void debug_print_packet(const LRTPPacket &packet)
     Serial.printf("Sequence Num: %u (0x%02X)\n", packet.seqNum, packet.seqNum);
     Serial.printf("Acknowledgment Num: %u (0x%02X)\n", packet.ackNum, packet.ackNum);
     Serial.printf("Payload: (%u bytes)\n", packet.payloadLength);
-    for (int i = 0; i < packet.payloadLength; i++)
+    for (unsigned int i = 0; i < packet.payloadLength; i++)
     {
         Serial.print(packet.payload[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
-    for (int i = 0; i < packet.payloadLength; i++)
+    for (unsigned int i = 0; i < packet.payloadLength; i++)
     {
         Serial.print((char)packet.payload[i]);
     }

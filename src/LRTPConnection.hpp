@@ -11,7 +11,10 @@ class LRTP;
 class LRTPConnection : public Stream
 {
 public:
+    // constructor
     LRTPConnection(uint16_t source, uint16_t destination);
+    // destructor
+    ~LRTPConnection();
 
     // Stream implementation
     int read() override;
@@ -23,16 +26,34 @@ public:
     virtual size_t write(const uint8_t *buf, size_t size) override;
     using Print::write; // include "Print" methods
     virtual void flush() override;
+    virtual int availableForWrite() override;
 
     /**
      * @brief opens the connection if it is currently closed (Sends SYN packet)
      *
-     * @return true if the connection is closed and the operation succeeded
-     * @return false if the connection is open or the operation failed
+     * @return true if the operation succeeded
+     * @return false if the operation failed
      */
     bool connect();
 
     bool close();
+    /**
+     * @brief Attaches a callback to be called when a new packet is received for this connection
+     *
+     * @param callback the callback to attach. The packet payload can be read by calling read()
+     */
+    void onDataReceived(std::function<void(void)> callback);
+
+    /**
+     * @brief Attach a callback hander to be called when the connection closes
+     *
+     * @param the function to call on close
+     */
+    void onClose(std::function<void(void)> callback);
+
+    uint16_t getRemoteAddr();
+
+    LRTPConnState getConnectionState();
 
     void updateTimers(unsigned long t);
     /**
@@ -48,10 +69,6 @@ public:
 
     // LRTPPacket *getNextTxPacket(unsigned long t);
     LRTPPacket *getNextTxPacket();
-
-    uint16_t getRemoteAddr();
-
-    LRTPConnState getConnectionState();
 
 private:
     // connection variables
@@ -91,11 +108,11 @@ private:
 
     LRTPConnState m_connectionState;
 
-    std::function<void()> m_onDataReceived = nullptr;
+    // callbacks
+    std::function<void(void)> m_onClose = nullptr;
+    std::function<void(void)> m_onDataReceived = nullptr;
 
-    // Private methods
-    void onDataReceived(std::function<void()> callback);
-
+    // private methods
     LRTPPacket *prepareNextPacket();
 
     // LRTPPacket *prepareNextTxPacket();
