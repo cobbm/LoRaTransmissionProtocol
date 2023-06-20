@@ -44,6 +44,11 @@ void LRTP::onConnect(std::function<void(std::shared_ptr<LRTPConnection>)> callba
     _onConnect = callback;
 }
 
+void LRTP::onBroadcastPacket(std::function<void(const LRTPPacket &)> callback)
+{
+    _onBroadcastPacket = callback;
+}
+
 int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len)
 {
     if (len < LRTP_HEADER_SZ)
@@ -117,6 +122,12 @@ void LRTP::handleIncomingConnectionPacket(const LRTPPacket &packet)
     }
 }
 
+void LRTP::handleIncomingBroadcastPacket(const LRTPPacket &packet)
+{
+    if (_onBroadcastPacket != nullptr)
+        _onBroadcastPacket(packet);
+}
+
 int LRTP::parseHeaderFlags(LRTPFlags *outFlags, uint8_t rawFlags)
 {
     outFlags->syn = (rawFlags >> 0x03) & 0x01;
@@ -151,8 +162,8 @@ void LRTP::loopReceive()
             }
             else if (pkt.dest == LRTP_BROADCAST_ADDR)
             {
-                // handleIncomingBroadcastPacket(pkt)
-                Serial.printf("%s: Broadcast packet received! TODO Implement broadcast!\n", __PRETTY_FUNCTION__);
+                handleIncomingBroadcastPacket(pkt);
+                // Serial.printf("%s: Broadcast packet received! TODO Implement broadcast!\n", __PRETTY_FUNCTION__);
             }
             else
             {
@@ -247,17 +258,19 @@ void LRTP::sendPacket(const LRTPPacket &packet)
 #endif
     setState(LoRaState::TRANSMIT);
 
+    // pack the version and type into a single byte. shift version left by 4 bits and OR with the lower 4 bits of the payload type
     uint8_t verAndType = (packet.version << 0x04) | (packet.payloadType & 0x0f);
+    // pack the flags and acknowledgment window into a single byte. shift flag bits left by 4 bits and OR with the lower 4 bits of the acknowledgment window size
     uint8_t flagsAndWindow = (packFlags(packet.flags) << 0x04) | (packet.ackWindow & 0x0f);
     // convert src and dest addresses from host to network order (big-endian)
-    uint16_t src_no = htons(packet.src);
-    uint16_t dest_no = htons(packet.dest);
+    uint16_t src_addr = htons(packet.src);
+    uint16_t dest_addr = htons(packet.dest);
     // now take higher and lower bytes of the 16 bit addresses
-    uint8_t src_lo = src_no >> 0x08;
-    uint8_t src_hi = src_no & 0xff;
-    uint8_t dest_lo = dest_no >> 0x08;
-    uint8_t dest_hi = dest_no & 0xff;
-    // write packet data
+    uint8_t src_lo = src_addr >> 0x08;
+    uint8_t src_hi = src_addr & 0xff;
+    uint8_t dest_lo = dest_addr >> 0x08;
+    uint8_t dest_hi = dest_addr & 0xff;
+    // write packet data in order specified by the specification
     LoRa.beginPacket();
     LoRa.write(verAndType);
     LoRa.write(flagsAndWindow);
@@ -267,7 +280,9 @@ void LRTP::sendPacket(const LRTPPacket &packet)
     LoRa.write(dest_lo);
     LoRa.write(packet.seqNum);
     LoRa.write(packet.ackNum);
+    // write the actual payload:
     LoRa.write(packet.payload, packet.payloadLength);
+    // call endPacket with true to use async mode
     LoRa.endPacket(true);
 }
 
@@ -390,46 +405,17 @@ void LRTP::setState(LoRaState newState)
 // ======= DEBUG METHODS =======
 void debug_print_packet(const LRTPPacket &packet)
 {
-    Serial.printf("Version: %u (0x%02X)\n", packet.version, packet.version);
-    Serial.printf("Type: %u (0x%02X)\n", packet.payloadType, packet.payloadType);
-    Serial.printf("Flags: (0x%02X) ", LRTP::packFlags(packet.flags));
-    if (packet.flags.syn)
-    {
-        Serial.print("S ");
-    }
-    else
-    {
-        Serial.print("- ");
-    }
-    if (packet.flags.fin)
-    {
-        Serial.print("F ");
-    }
-    else
-    {
-        Serial.print("- ");
-    }
-    if (packet.flags.ack)
-    {
-        Serial.print("A ");
-    }
-    else
-    {
-        Serial.print("- ");
-    }
-    Serial.printf("X\n");
-    Serial.printf("Ack Window: %u (0x%02X)\n", packet.ackWindow, packet.ackWindow);
-    Serial.printf("Source: %u (0x%04X)\n", packet.src, packet.src);
-    Serial.printf("Destination: %u (0x%04X)\n", packet.dest, packet.dest);
-    Serial.printf("Sequence Num: %u (0x%02X)\n", packet.seqNum, packet.seqNum);
-    Serial.printf("Acknowledgment Num: %u (0x%02X)\n", packet.ackNum, packet.ackNum);
-    Serial.printf("Payload: (%u bytes)\n", packet.payloadLength);
+    // print packet headers
+    debug_print_packet_header(packet);
+    // print the packet payload in hex:
+    Serial.println("\nPayload:");
     for (unsigned int i = 0; i < packet.payloadLength; i++)
     {
         Serial.print(packet.payload[i], HEX);
         Serial.print(" ");
     }
     Serial.println();
+    // print the raw packet payload (ASCII)
     for (unsigned int i = 0; i < packet.payloadLength; i++)
     {
         Serial.print((char)packet.payload[i]);
@@ -439,37 +425,27 @@ void debug_print_packet(const LRTPPacket &packet)
 
 void debug_print_packet_header(const LRTPPacket &packet)
 {
-    Serial.printf("Src: %u (0x%04X) ", packet.src, packet.src);
-    Serial.printf("Dest: %u (0x%04X) ", packet.dest, packet.dest);
+    // print version and type header info
+    Serial.printf("Version: %u (0x%02X)\n", packet.version, packet.version);
+    Serial.printf("Type: %u (0x%02X)\n", packet.payloadType, packet.payloadType);
+    // print the raw flags nibble
     Serial.printf("Flags: (0x%02X) ", LRTP::packFlags(packet.flags));
-    if (packet.flags.syn)
-    {
-        Serial.print("S ");
-    }
-    else
-    {
-        Serial.print("- ");
-    }
-    if (packet.flags.fin)
-    {
-        Serial.print("F ");
-    }
-    else
-    {
-        Serial.print("- ");
-    }
-    if (packet.flags.ack)
-    {
-        Serial.print("A ");
-    }
-    else
-    {
-        Serial.print("- ");
-    }
-    Serial.printf("X ");
-    Serial.printf("Seq: %u (0x%02X) ", packet.seqNum, packet.seqNum);
-    Serial.printf("Ack: %u (0x%02X) ", packet.ackNum, packet.ackNum);
-    Serial.printf("\t\tPayload Length: %u\n", packet.payloadLength);
+    // print the flags (as parsed)
+    Serial.print(packet.flags.syn ? "S " : "- ");
+    Serial.print(packet.flags.fin ? "F " : "- ");
+    Serial.print(packet.flags.ack ? "A " : "- ");
+    // reserved flag bit
+    Serial.printf("X\n");
+    // size of the remote acknowledgement window in packets
+    Serial.printf("Ack Window: %u (0x%02X)\n", packet.ackWindow, packet.ackWindow);
+    // source and destiantion addresses
+    Serial.printf("Source: %u (0x%04X)\n", packet.src, packet.src);
+    Serial.printf("Destination: %u (0x%04X)\n", packet.dest, packet.dest);
+    // sequence and acknowledgement numbers
+    Serial.printf("Sequence Num: %u (0x%02X)\n", packet.seqNum, packet.seqNum);
+    Serial.printf("Acknowledgment Num: %u (0x%02X)\n", packet.ackNum, packet.ackNum);
+    // print the packet payload length
+    Serial.printf("Payload: %u bytes.\n", packet.payloadLength);
 }
 
 const char *LORAStateToStr(LoRaState state)

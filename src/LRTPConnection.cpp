@@ -168,8 +168,6 @@ void LRTPConnection::updateTimers(unsigned long t)
 bool LRTPConnection::isReadyForTransmit()
 {
     // we can transmit a packet if there is data in the send buffer, or if we need to send a control packet
-    // bool packetTimeout = m_timer_packetTimeoutActive && t - m_timer_packetTimeout >= LRTP_PACKET_TIMEOUT;
-    // bool piggybackTimeout = m_timer_piggybackTimeoutActive && t - m_timer_piggybackTimeout >= LRTP_PIGGYBACK_TIMEOUT;
     bool dataWaitingForTransmit = m_txDataBuffer.count() > 0;
     bool connectionOpen = m_connectionState == LRTPConnState::CONNECTED;
 
@@ -177,13 +175,13 @@ bool LRTPConnection::isReadyForTransmit()
 
     bool canTransmitData = connectionOpen && ((dataWaitingForTransmit && positionInWindow < m_windowSize) || (positionInWindow < m_txWindow.count()));
 
-    return /*packetTimeout || piggybackTimeout ||*/ m_sendPiggybackPacket || canTransmitData;
+    return m_sendPiggybackPacket || canTransmitData;
 }
 
 LRTPPacket *LRTPConnection::prepareNextPacket()
 {
     // check if we're connected
-    if (m_connectionState != LRTPConnState::CONNECTED /*|| m_connectionState != LRTPConnState::CLOSE_FIN*/)
+    if (m_connectionState != LRTPConnState::CONNECTED)
         return nullptr;
     // check that there is data waiting to transmit and that there is space inside the transmit window to queue the packet
     size_t bytesWaiting = m_txDataBuffer.count();
@@ -196,7 +194,6 @@ LRTPPacket *LRTPConnection::prepareNextPacket()
             const int packetPayloadSz = min(m_txDataBuffer.count(), (size_t)LRTP_MAX_PAYLOAD_SZ);
             if (packetPayloadSz > 0)
             {
-                // TODO: Better approach than malloc?
                 uint8_t *payloadBuff = (uint8_t *)malloc(sizeof(uint8_t) * packetPayloadSz);
 
                 nextPacket->payload = payloadBuff;
@@ -421,7 +418,6 @@ bool LRTPConnection::handleStateConnected(const LRTPPacket &packet)
         if (hasPayload)
         {
             // we need to send an ACK for this payload
-            // TODO: Check for BUG:
             m_piggybackFlags = {
                 .syn = false,
                 .fin = false,
@@ -477,9 +473,7 @@ void LRTPConnection::handleIncomingPacket(const LRTPPacket &packet)
         break;
 
     case LRTPConnState::CLOSE_FIN_ACK:
-
-        // case LRTPConnState::CLOSE_END:
-        Serial.printf(" ==== Error: UNIMPLEMENTED STATE %s ===\n", connStateToStr(m_connectionState));
+        Serial.printf(" ==== Error: Unimplemented State %s ===\n", connStateToStr(m_connectionState));
         break;
     default:
         Serial.printf("%s: Invalid state: %s\n", __PRETTY_FUNCTION__, connStateToStr(m_connectionState));
@@ -530,10 +524,6 @@ void LRTPConnection::advanceSendWindow(uint16_t ackNum)
     // Serial.printf("===== advanceSendWindow() m_currentSeqNum = %u =====\n", m_seqBase);
     m_seqBase = longSeqBase;
     m_currentSeqNum = m_seqBase;
-    // m_packetRetries = 0;
-    //} else if (packet.ackNum == ((m_seqBase-1) & 0xff)){
-    //    //resend the entire window
-    //}
 }
 
 void LRTPConnection::handlePacketAckFlag(const LRTPPacket &packet)
@@ -649,9 +639,6 @@ const char *connStateToStr(LRTPConnState state)
     case LRTPConnState::CLOSE_FIN_ACK:
         return "CLOSE_FIN_ACK";
         break;
-    // case LRTPConnState::CLOSE_END:
-    //     return "CLOSE_END";
-    // break;
     default:
         return "INVALID";
         break;

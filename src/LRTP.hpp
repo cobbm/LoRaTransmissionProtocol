@@ -38,6 +38,11 @@ public:
      *
      */
     void onConnect(std::function<void(std::shared_ptr<LRTPConnection>)> callback);
+    /**
+     * @brief Set a handler to be called when a broadcast packet is received
+     *
+     */
+    void onBroadcastPacket(std::function<void(const LRTPPacket &)> callback);
 
     /**
      * @brief Parse a raw packet into the struct outPacket from a buffer of given length
@@ -81,6 +86,7 @@ private:
 
     // event handlers
     std::function<void(std::shared_ptr<LRTPConnection>)> _onConnect = nullptr;
+    std::function<void(const LRTPPacket &)> _onBroadcastPacket = nullptr;
 
     // handles receiveing data from the radio during the update loop
     void loopReceive();
@@ -102,6 +108,8 @@ private:
     void handleIncomingPacket(const LRTPPacket &packet);
 
     void handleIncomingConnectionPacket(const LRTPPacket &packet);
+
+    void handleIncomingBroadcastPacket(const LRTPPacket &packet);
 
     // sends a packet once CAD has finished
     void sendPacket(const LRTPPacket &packet);

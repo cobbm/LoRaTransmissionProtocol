@@ -3,7 +3,7 @@
 #include <SPI.h>
 #include <LoRa.h>
 
-#include "LoRaConfig.h"
+#include "../LoRaConfig.h"
 
 #include <LRTP.hpp>
 
@@ -34,16 +34,11 @@ void setupLoRaConfig()
     LoRa.setCodingRate4(LORA_CODING_RATE);
     LoRa.setPreambleLength(LORA_PREAMBLE_LENGTH);
     LoRa.setSignalBandwidth(LORA_SIGNAL_BANDWIDTH);
-
-#ifdef ARDUINO_TTGO_LoRa32_v21new
-    // TTGO has output connected to PA_OUTPUT_RFO_PIN
-    // LoRa.setTxPower(17, PA_OUTPUT_PA_BOOST_PIN);
-#endif
 }
 
 void newConnection(std::shared_ptr<LRTPConnection> connection)
 {
-    Serial.printf("New connection from %u!!!\n", connection->getRemoteAddr());
+    Serial.printf("New connection from node %u!\n", connection->getRemoteAddr());
     testCon = connection;
 }
 
@@ -69,22 +64,19 @@ void loop()
     if (testCon != nullptr)
     {
         unsigned long t = millis();
-        if (t - lastTx >= txEvery)
+        if (Serial.available() > 0 && testCon->availableForWrite() > 0)
         {
-            Serial.printf("Wrote some data...");
-            //  write some data
-            testCon->println("HELLO WORLD TESTING!");
-            lastTx = t;
+            //  write data from the serial port
+            testCon->write(Serial.read());
         }
-        // read some data
+
         if (testCon->available() > 0)
         {
-            Serial.print("Reading data: ");
+            // read all data from the LRTP connection
             while (testCon->available() > 0)
             {
-                Serial.print((char)testCon->read());
+                Serial.write(testCon->read());
             }
-            Serial.println();
         }
     }
 }
