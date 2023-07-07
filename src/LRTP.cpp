@@ -76,12 +76,7 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len) {
 }
 
 void LRTP::handleIncomingPacket(const LRTPPacket &packet) {
-// debug_print_packet(packet);
-#ifdef LRTP_DEBUG
-    lrtp_infof("Handling packet (header):\n");
-
-    debug_print_packet_header(packet);
-#endif
+    debug_print_packet(packet);
 
     // find connection pertaining to this packet
     std::unordered_map<uint16_t, std::shared_ptr<LRTPConnection>>::const_iterator connection = m_activeConnections.find(packet.src);

@@ -155,7 +155,8 @@ bool LRTPConnection::isReadyForTransmit() {
     bool canTransmitData = connectionOpen && ((dataWaitingForTransmit && positionInWindow < m_windowSize) || (positionInWindow < m_txWindow.count()));
 
     if (m_sendPiggybackPacket || canTransmitData) {
-        lrtp_infof("dataWaiting: %u, connectionOpen: %u, canTransmit: %u, sendPiggyback: %u\n",
+        lrtp_infof("[%u] dataWaiting: %u, connectionOpen: %u, canTransmit: %u, sendPiggyback: %u\n",
+            m_destAddr,
             dataWaitingForTransmit,
             connectionOpen,
             canTransmitData,
