@@ -15,8 +15,7 @@
 #define LRTP_PACKET_TIMEOUT 7.5 * 1000 // 15 seconds
 
 #define LRTP_PIGGYBACK_TIMEOUT_DIV 6 // 2
-#define LRTP_PIGGYBACK_TIMEOUT                                                 \
-  (LRTP_PACKET_TIMEOUT / LRTP_PIGGYBACK_TIMEOUT_DIV)
+#define LRTP_PIGGYBACK_TIMEOUT (LRTP_PACKET_TIMEOUT / LRTP_PIGGYBACK_TIMEOUT_DIV)
 
 #define LRTP_CAD_ROUNDS 3
 
@@ -26,45 +25,49 @@
 #define LRTP_DEFAULT_ACKWIN LRTP_TX_PACKET_BUFFER_SZ
 
 // TODO: Check if this is used?
-//
-// #define LRTP_DEBUG 4 /* DEBUG */
+
+#define LRTP_DEBUG 1
+
+// #define LRTP_DEBUG 4 /* FATAL */
+// ENABLE THIS AT YOUR OWN RISH - WILL PROBABLY CRASH YOUR DEVICE!
 // #define LRTP_DEBUG 0 /* DEBUG */
-#define LRTP_DEBUG 1 /* INFO */
+// Keep 1 or higher for Info to save yourself from WDT problems :)
+#define LRTP_LOG_LEVEL 3 /* INFO*/
 
 enum class LRTPError {
-  NONE,
-  INVALID_SYN,
-  INVALID_SYN_ACK,
-  CLOSE_FIN_ACK,
-  INVALID_SYN_ACK_SYN,
-  INVALID_STATE,
+    NONE,
+    INVALID_SYN,
+    INVALID_SYN_ACK,
+    CLOSE_FIN_ACK,
+    INVALID_SYN_ACK_SYN,
+    INVALID_STATE,
 };
 
 struct LRTPFlags {
-  bool syn;
-  bool fin;
-  bool ack;
+    bool syn;
+    bool fin;
+    bool ack;
 };
 
 struct LRTPPacket {
-  uint8_t version;
-  uint8_t payloadType;
-  LRTPFlags flags;
-  uint8_t ackWindow;
-  uint16_t src;
-  uint16_t dest;
-  uint8_t seqNum;
-  uint8_t ackNum;
-  uint8_t *payload;
-  size_t payloadLength;
+    uint8_t version;
+    uint8_t payloadType;
+    LRTPFlags flags;
+    uint8_t ackWindow;
+    uint16_t src;
+    uint16_t dest;
+    uint8_t seqNum;
+    uint8_t ackNum;
+    uint8_t *payload;
+    size_t payloadLength;
 };
 
 enum class LRTPConnState {
-  CLOSED,
-  CONNECT_SYN,
-  CONNECT_SYN_ACK,
-  CONNECTED,
-  CLOSE_FIN,
-  CLOSE_FIN_ACK,
-  // CLOSE_END
+    CLOSED,
+    CONNECT_SYN,
+    CONNECT_SYN_ACK,
+    CONNECTED,
+    CLOSE_FIN,
+    CLOSE_FIN_ACK,
+    // CLOSE_END
 };
