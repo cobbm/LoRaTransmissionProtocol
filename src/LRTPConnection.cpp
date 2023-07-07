@@ -511,8 +511,7 @@ void LRTPConnection::advanceSendWindow(uint16_t ackNum) {
             longSeqBase++;
         }
     }
-    // Serial.printf("===== advanceSendWindow() m_currentSeqNum = %u =====\n",
-    // m_seqBase);
+    lrtp_infof("===== [%u] advanceSendWindow() m_currentSeqNum = %u =====\n", m_destAddr, m_seqBase);
     m_seqBase = longSeqBase;
     m_currentSeqNum = m_seqBase;
 }
@@ -580,9 +579,6 @@ void LRTPConnection::onPacketTimeout() {
 }
 
 void LRTPConnection::startPiggybackTimeoutTimer() {
-#if LRTP_DEBUG > 1
-    Serial.printf("== Start Piggyback Timeout Timer ==\n");
-#endif
 
     lrtp_infof("== [%u] Start Piggyback Timeout Timer ==\n", m_destAddr);
 
@@ -590,9 +586,6 @@ void LRTPConnection::startPiggybackTimeoutTimer() {
     m_timer_piggybackTimeout = millis();
 }
 void LRTPConnection::onPiggybackTimeout() {
-#if LRTP_DEBUG > 1
-    Serial.printf("== Piggyback Timer TIMEOUT ==\n");
-#endif
 
     lrtp_infof("== [%u] Piggyback Timer TIMEOUT ==\n", m_destAddr);
 
