@@ -32,6 +32,12 @@
 // ENABLE THIS AT YOUR OWN RISH - WILL PROBABLY CRASH YOUR DEVICE!
 // #define LRTP_DEBUG 0 /* DEBUG */
 // Keep 1 or higher for Info to save yourself from WDT problems :)
+// 0 - panic
+// 1 - error
+// 2 - warning
+// 3 - info
+// 4 - debug
+//
 #define LRTP_LOG_LEVEL 3 /* INFO*/
 
 enum class LRTPError {
