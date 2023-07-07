@@ -78,7 +78,7 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len) {
 void LRTP::handleIncomingPacket(const LRTPPacket &packet) {
 // debug_print_packet(packet);
 #ifdef LRTP_DEBUG
-    lrtp_debug("Handling packet: (header)\n");
+    lrtp_infof("Handling packet (header):\n");
 
     debug_print_packet_header(packet);
 #endif
@@ -462,10 +462,8 @@ void LRTP::handleCADDone(unsigned long t) {
     if (p != nullptr) {
 #if LRTP_DEBUG > 3
         debug_print_packet(*p);
-#else
-#if LRTP_DEBUG > 1
+#elif LRTP_DEBUG > 1
         debug_print_packet_header(*p);
-#endif
 #endif
 
         sendPacket(*p);
