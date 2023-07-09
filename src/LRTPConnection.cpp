@@ -168,8 +168,8 @@ bool LRTPConnection::isReadyForTransmit() {
 LRTPPacket *LRTPConnection::prepareNextPacket() {
     lrtp_infof("[%u] Creating LRTP Packet, payload size: %u bytes\n", m_destAddr, m_txDataBuffer.count());
     // check if we're connected
-    if (!(m_connectionState == LRTPConnState::CONNECTED /*|| m_connectionState == LRTPConnState::CONNECT_SYN ||
-            m_connectionState == LRTPConnState::CONNECT_SYN_ACK*/)) {
+    if (!(m_connectionState == LRTPConnState::CONNECTED /*|| m_connectionState == LRTPConnState::CONNECT_SYN*/ ||
+            m_connectionState == LRTPConnState::CONNECT_SYN_ACK)) {
         lrtp_infof("[%u] NOT CONNECTED\n", m_destAddr);
         return nullptr;
     }
@@ -368,6 +368,7 @@ bool LRTPConnection::handleStateConnectSYN(const LRTPPacket &packet) {
             .fin = false,
             .ack = false,
         };
+       
         m_sendPiggybackPacket = true;
         // start packet timeout:
         startPacketTimeoutTimer();

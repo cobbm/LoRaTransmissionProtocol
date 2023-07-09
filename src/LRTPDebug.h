@@ -23,13 +23,13 @@ const char *LRTP_LOG_LEVEL_STR(int logLevel);
 
 #define LRTP_REPORT_MESSAGE(__x__, __y__)                                                                                                                      \
     if (LRTP_LOG_LEVEL >= (__x__)) {                                                                                                                           \
-        Serial.printf("[%s] %s: %s\n", LRTP_LOG_LEVEL_STR(LRTP_LOG_LEVEL), __PRETTY_FUNCTION__, (__y__));                                                      \
+        Serial.printf("[LRTP] [%s] %s: %s\n", LRTP_LOG_LEVEL_STR(LRTP_LOG_LEVEL), __PRETTY_FUNCTION__, (__y__));                                               \
     }
 
 #define LRTP_REPORT_MESSAGEF(...)                                                                                                                              \
     {                                                                                                                                                          \
         if (LRTP_LOG_LEVEL >= (FIRST_ARG(__VA_ARGS__))) {                                                                                                      \
-            Serial.printf("[%s] %s: ", LRTP_LOG_LEVEL_STR(FIRST_ARG(__VA_ARGS__)), __PRETTY_FUNCTION__);                                                       \
+            Serial.printf("[LRTP] [%s] %s: ", LRTP_LOG_LEVEL_STR(FIRST_ARG(__VA_ARGS__)), __PRETTY_FUNCTION__);                                                \
             Serial.printf(REST_ARG(__VA_ARGS__));                                                                                                              \
         }                                                                                                                                                      \
     }

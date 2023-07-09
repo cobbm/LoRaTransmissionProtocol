@@ -76,6 +76,7 @@ int LRTP::parsePacket(LRTPPacket *outPacket, uint8_t *buf, size_t len) {
 }
 
 void LRTP::handleIncomingPacket(const LRTPPacket &packet) {
+    lrtp_infof("LRTP Received from %u:\n", packet.dest);
     debug_print_packet(packet);
 
     // find connection pertaining to this packet
@@ -481,21 +482,23 @@ void debug_print_packet(const LRTPPacket &packet) {
     debug_print_packet_header(packet);
     // print the packet payload in hex:
     Serial.println("\nPayload:");
-    for (unsigned int i = 0; i < packet.payloadLength; i++) {
-        Serial.print(packet.payload[i], HEX);
-        Serial.print(" ");
-    }
-    Serial.println();
+
     // print the raw packet payload (ASCII)
+    int j = 16;
     for (unsigned int i = 0; i < packet.payloadLength; i++) {
-        Serial.print((char)packet.payload[i]);
+        Serial.printf("%02x ", packet.payload[i]);
+        j--;
+        if (j <= 0) {
+            Serial.println();
+            j = 16;
+        }
     }
     Serial.println();
 }
 
 void debug_print_packet_header(const LRTPPacket &packet) {
     // print version and type header info
-    Serial.printf("Version: %u (0x%02X)\n", packet.version, packet.version);
+    Serial.printf("Version: %u (0x%02X)\t\t", packet.version, packet.version);
     Serial.printf("Type: %u (0x%02X)\n", packet.payloadType, packet.payloadType);
     // print the raw flags nibble
     Serial.printf("Flags: (0x%02X) ", LRTP::packFlags(packet.flags));
@@ -504,14 +507,14 @@ void debug_print_packet_header(const LRTPPacket &packet) {
     Serial.print(packet.flags.fin ? "F " : "- ");
     Serial.print(packet.flags.ack ? "A " : "- ");
     // reserved flag bit
-    Serial.printf("X\n");
+    Serial.printf("X\t\t");
     // size of the remote acknowledgement window in packets
     Serial.printf("Ack Window: %u (0x%02X)\n", packet.ackWindow, packet.ackWindow);
     // source and destiantion addresses
-    Serial.printf("Source: %u (0x%04X)\n", packet.src, packet.src);
+    Serial.printf("Source: %u (0x%04X)\t\t", packet.src, packet.src);
     Serial.printf("Destination: %u (0x%04X)\n", packet.dest, packet.dest);
     // sequence and acknowledgement numbers
-    Serial.printf("Sequence Num: %u (0x%02X)\n", packet.seqNum, packet.seqNum);
+    Serial.printf("Sequence Num: %u (0x%02X)\t\t", packet.seqNum, packet.seqNum);
     Serial.printf("Acknowledgment Num: %u (0x%02X)\n", packet.ackNum, packet.ackNum);
     // print the packet payload length
     Serial.printf("Payload: %u bytes.\n", packet.payloadLength);
